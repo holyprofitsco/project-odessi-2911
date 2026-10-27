@@ -24,3 +24,9 @@
 body {
   @apply bg-canvas text-ink font-sans text-sm antialiased;
 }
+
+/* While dragging an area, the closed hand shows everywhere, even over links and buttons. */
+.is-grabbing,
+.is-grabbing * {
+  cursor: grabbing !important;
+}

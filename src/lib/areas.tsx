@@ -53,7 +53,7 @@ export function useAreaOrder() {
     let order = saved
     setDragging(key)
     setDraft(order)
-    document.body.style.cursor = 'grabbing'
+    document.documentElement.classList.add('is-grabbing')
 
     const onMove = (e: globalThis.PointerEvent) => {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-area]')?.getAttribute('data-area')
@@ -65,7 +65,7 @@ export function useAreaOrder() {
       setDraft(order)
     }
     const onUp = () => {
-      document.body.style.cursor = ''
+      document.documentElement.classList.remove('is-grabbing')
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
