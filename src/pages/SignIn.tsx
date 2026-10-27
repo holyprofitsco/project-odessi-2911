@@ -154,7 +154,7 @@ export default function SignIn() {
               <button
                 type="submit"
                 disabled={busy}
-                className="h-9 w-full rounded-[10px] bg-accent text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="h-9 w-full rounded-[10px] bg-ink text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {busy ? 'One moment…' : buttonLabels[mode]}
               </button>
