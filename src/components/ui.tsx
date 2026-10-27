@@ -133,10 +133,13 @@ export function Popover({
   trigger,
   children,
   align = 'start',
+  side = 'bottom',
 }: {
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode
   children: (close: () => void) => ReactNode
   align?: 'start' | 'end'
+  // 'right' opens beside the trigger, lined up with its bottom (used by the sidebar avatar).
+  side?: 'bottom' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -149,8 +152,8 @@ export function Popover({
       {open && (
         <div
           className={cx(
-            'absolute top-full z-30 mt-1.5 min-w-44 rounded-xl border border-border bg-surface p-1 shadow-popup',
-            align === 'end' ? 'right-0' : 'left-0',
+            'absolute z-30 min-w-44 rounded-xl border border-border bg-surface p-1 shadow-popup',
+            side === 'right' ? 'bottom-0 left-full ml-3' : cx('top-full mt-1.5', align === 'end' ? 'right-0' : 'left-0'),
           )}
         >
           {children(close)}
