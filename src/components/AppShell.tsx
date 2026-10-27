@@ -1,8 +1,8 @@
 import { useState, type ComponentType } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { HomeIcon } from './icons'
+import { GripIcon, HomeIcon } from './icons'
 import { MenuItem, Popover } from './ui'
-import { areas } from '../lib/areas'
+import { useAreaOrder } from '../lib/areas'
 import { supabase } from '../lib/supabase'
 import { useWorkspace } from '../lib/workspace'
 
@@ -32,8 +32,9 @@ export default function AppShell() {
   const { workspace, profile } = useWorkspace()
   const [expanded, setExpanded] = useState(false)
   const navigate = useNavigate()
+  const { list, dragging, dragProps } = useAreaOrder()
 
-  const visibleAreas = areas.filter((a) => a.key === 'tasks' || workspace?.areas_on[a.key] !== false)
+  const visibleAreas = list.filter((a) => a.key === 'tasks' || workspace?.areas_on[a.key] !== false)
   const initial = (profile?.first_name || profile?.email || '?').charAt(0).toUpperCase()
 
   return (
@@ -61,7 +62,13 @@ export default function AppShell() {
 
         <NavItem to="/" end label="Home" Icon={HomeIcon} expanded={expanded} />
         {visibleAreas.map((a) => (
-          <NavItem key={a.key} to={a.path} label={a.label} Icon={a.Icon} expanded={expanded} />
+          // Home stays pinned on top. Areas below it drag by their ⋮⋮ handle, which shows on hover.
+          <div key={a.key} {...dragProps(a.key)} className={['group relative', dragging === a.key ? 'opacity-40' : ''].join(' ')}>
+            <span className="pointer-events-none absolute top-1/2 -left-3 -translate-y-1/2 cursor-grab text-faint opacity-0 group-hover:opacity-100">
+              <GripIcon size={12} />
+            </span>
+            <NavItem to={a.path} label={a.label} Icon={a.Icon} expanded={expanded} />
+          </div>
         ))}
 
         <div className="flex-1" />

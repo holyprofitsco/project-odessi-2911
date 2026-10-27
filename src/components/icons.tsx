@@ -45,3 +45,9 @@ export const DocsIcon = (p: { size?: number }) => (
     <path d="M14 4v5h5M9 13h6M9 16.5h4" />
   </Icon>
 )
+// The ⋮⋮ drag handle, shown on hover.
+export const GripIcon = ({ size = 14 }: { size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 14 14" fill="currentColor">
+    {[3.5, 7, 10.5].map((y) => [5, 9].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r={1.1} />))}
+  </svg>
+)

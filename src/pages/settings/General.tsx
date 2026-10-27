@@ -1,5 +1,6 @@
 import { Card, CardHeader, CardRow, Dropdown, Switch } from '../../components/ui'
-import { areas } from '../../lib/areas'
+import { GripIcon } from '../../components/icons'
+import { useAreaOrder } from '../../lib/areas'
 import { useWorkspace } from '../../lib/workspace'
 import { SettingsTitle } from './SettingsLayout'
 
@@ -34,6 +35,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default function General() {
   const { workspace, updateWorkspace } = useWorkspace()
+  const { list, dragging, dragProps } = useAreaOrder()
   if (!workspace) return null
 
   const zoneOptions = timeZones.some((z) => z.value === workspace.time_zone)
@@ -47,10 +49,13 @@ export default function General() {
       <Card>
         <CardHeader
           title="Areas"
-          description="Turn off what you don't use. Nothing gets deleted: turn an area back on and everything is right where you left it."
+          description="Turn off what you don't use, and drag to change the order. Nothing gets deleted: turn an area back on and everything is right where you left it."
         />
-        {areas.map((a) => (
-          <CardRow key={a.key}>
+        {list.map((a) => (
+          <CardRow key={a.key} {...dragProps(a.key)} className={['group relative', dragging === a.key ? 'opacity-40' : ''].join(' ')}>
+            <span className="absolute top-1/2 left-1 -translate-y-1/2 cursor-grab text-faint opacity-0 group-hover:opacity-100">
+              <GripIcon />
+            </span>
             <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-[#F9F9FA] text-[#444444]">
               <a.Icon size={18} />
             </span>

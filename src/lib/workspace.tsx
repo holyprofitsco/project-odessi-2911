@@ -9,6 +9,7 @@ export type Workspace = {
   name: string
   solo_mode: boolean
   areas_on: Record<AreaKey, boolean>
+  areas_order: string[]
   time_zone: string
   week_start: 'sunday' | 'monday'
   weekend_rule: 'ask' | 'friday' | 'monday'

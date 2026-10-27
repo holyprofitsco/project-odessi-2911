@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type HTMLAttributes,
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -58,9 +59,9 @@ export function CardHeader({ title, description }: { title: string; description?
 }
 
 // A row inside a card. Rows after the first get a hairline divider.
-export function CardRow({ children, className }: { children: ReactNode; className?: string }) {
+export function CardRow({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cx('flex min-h-11 items-center gap-3 border-divider px-[18px] py-1.5 [&+&]:border-t', className)}>
+    <div {...rest} className={cx('flex min-h-11 items-center gap-3 border-divider px-[18px] py-1.5 [&+&]:border-t', className)}>
       {children}
     </div>
   )
