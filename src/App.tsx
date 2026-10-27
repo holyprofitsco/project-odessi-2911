@@ -3,6 +3,8 @@ import { Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import { supabase } from './lib/supabase'
 import SignIn from './pages/SignIn'
+import UiPreview from './pages/UiPreview'
+import { ToastProvider } from './components/ui'
 
 // Placeholder until the sidebar and Home arrive later in Stage 0.
 function Welcome() {
@@ -40,9 +42,12 @@ function Gate() {
   if (loading) return null
   if (!session || recovering) return <SignIn />
   return (
-    <Routes>
-      <Route path="*" element={<Welcome />} />
-    </Routes>
+    <ToastProvider>
+      <Routes>
+        <Route path="/ui" element={<UiPreview />} />
+        <Route path="*" element={<Welcome />} />
+      </Routes>
+    </ToastProvider>
   )
 }
 
