@@ -101,7 +101,7 @@ export default function SignIn() {
           {mode === 'check-email' ? (
             <>
               <p className="mt-2 text-muted">{sentMessage}</p>
-              <button onClick={() => switchTo('sign-in')} className="mt-5 text-sm font-medium text-accent hover:underline">
+              <button onClick={() => switchTo('sign-in')} className="mt-5 text-sm font-medium text-ink hover:underline">
                 Back to sign in
               </button>
             </>
@@ -154,7 +154,7 @@ export default function SignIn() {
               <button
                 type="submit"
                 disabled={busy}
-                className="h-9 w-full rounded-[10px] bg-ink text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="h-9 w-full rounded-[10px] bg-accent text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {busy ? 'One moment…' : buttonLabels[mode]}
               </button>
@@ -166,7 +166,7 @@ export default function SignIn() {
           {mode === 'sign-in' && (
             <>
               New here?{' '}
-              <button onClick={() => switchTo('sign-up')} className="font-medium text-accent hover:underline">
+              <button onClick={() => switchTo('sign-up')} className="font-medium text-ink hover:underline">
                 Create an account
               </button>
             </>
@@ -174,7 +174,7 @@ export default function SignIn() {
           {(mode === 'sign-up' || mode === 'forgot') && (
             <>
               Already have an account?{' '}
-              <button onClick={() => switchTo('sign-in')} className="font-medium text-accent hover:underline">
+              <button onClick={() => switchTo('sign-in')} className="font-medium text-ink hover:underline">
                 Sign in
               </button>
             </>
