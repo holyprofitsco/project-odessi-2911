@@ -140,7 +140,7 @@ export function Popover({
   children: (close: () => void) => ReactNode
   align?: 'start' | 'end'
   // 'right' opens beside the trigger, lined up with its bottom (used by the sidebar avatar).
-  side?: 'bottom' | 'right'
+  side?: 'bottom' | 'right' | 'top'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -154,7 +154,7 @@ export function Popover({
         <div
           className={cx(
             'absolute z-30 min-w-44 rounded-xl border border-border bg-surface p-1 shadow-popup',
-            side === 'right' ? 'bottom-0 left-full ml-3' : cx('top-full mt-1.5', align === 'end' ? 'right-0' : 'left-0'),
+            side === 'right' ? 'bottom-0 left-full ml-3' : side === 'top' ? cx('bottom-full mb-1.5', align === 'end' ? 'right-0' : 'left-0') : cx('top-full mt-1.5', align === 'end' ? 'right-0' : 'left-0'),
           )}
         >
           {children(close)}
@@ -242,10 +242,11 @@ export function Dropdown<T extends string>({
 
 /* "…" menu: never boxed, always at the far right of its row, with a "More" tooltip. */
 
-export function MoreMenu({ children }: { children: (close: () => void) => ReactNode }) {
+export function MoreMenu({ children, side }: { children: (close: () => void) => ReactNode; side?: 'top' | 'bottom' }) {
   return (
     <Popover
       align="end"
+      side={side}
       trigger={({ open, toggle }) => (
         <button
           type="button"
@@ -272,12 +273,14 @@ export function Modal({
   title,
   children,
   footer,
+  wide,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
   footer?: ReactNode
+  wide?: boolean
 }) {
   useEffect(() => {
     if (!open) return
@@ -294,7 +297,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         onMouseDown={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-surface shadow-popup"
+        className={cx('flex max-h-[88vh] w-full flex-col rounded-2xl bg-surface shadow-popup', wide ? 'max-w-[680px]' : 'max-w-lg')}
       >
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-base font-semibold">{title}</h2>
