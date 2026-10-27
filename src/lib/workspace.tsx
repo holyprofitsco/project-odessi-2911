@@ -16,6 +16,7 @@ export type Workspace = {
   comments_on: boolean
   priorities_on: boolean
   auto_complete_parent: boolean
+  warm_last_contact: boolean
   morning_ends: string
   afternoon_ends: string
   default_due: 'none' | 'today'

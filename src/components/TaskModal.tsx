@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useClients } from '../lib/clients'
 import { formatDate } from '../lib/dates'
 import { priorityStyles, useTasks, type Priority, type Task } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
-import { DatePicker, TimePicker } from './pickers'
+import { Avatar, ConnectionChip, ConnectPicker, useClientSearch } from './clientParts'
+import { DatePicker, Floating, TimePicker } from './pickers'
 import RepeatPicker from './RepeatPicker'
 import { Checkbox, StatusEditor, StatusPicker } from './taskParts'
 import { Button, MenuItem, Modal, MoreMenu } from './ui'
@@ -179,15 +182,7 @@ function Inner(p: InnerProps) {
               </div>
               <div className="flex items-start gap-3 text-[13px]">
                 <span className="w-24 pt-2 font-semibold text-waiting">Waiting on</span>
-                <textarea
-                  aria-label="Waiting on"
-                  rows={2}
-                  placeholder="A person or a thing, like “Jordan” or “the signed contract”"
-                  value={waitingOn}
-                  onChange={(e) => setWaitingOn(e.target.value)}
-                  onBlur={flush}
-                  className={`${inputCls} h-auto min-h-[56px] flex-1 resize-y py-2 leading-relaxed`}
-                />
+                <WaitingOn task={task} text={waitingOn} setText={setWaitingOn} onBlur={flush} />
               </div>
               <div className="flex items-center gap-3 text-[13px]">
                 <span className="w-24 font-semibold text-waiting">Check in</span>
@@ -219,6 +214,9 @@ function Inner(p: InnerProps) {
                 onChange={(repeat_rule) => updateTask(task.id, { repeat_rule, repeat_anchor: null })}
                 onFromChange={(repeat_from) => updateTask(task.id, { repeat_from })}
               />
+            </Field>
+            <Field label="Connected to">
+              <Connected taskId={task.id} />
             </Field>
             {workspace.priorities_on && (
               <Field label="Priority">
@@ -337,6 +335,111 @@ function Inner(p: InnerProps) {
       >
         <p className="text-sm text-muted">“{task.title || 'Untitled'}”{subtasks.length > 0 && ' and its subtasks'} will be gone for good. If you only want it out of the way, cancel it instead.</p>
       </Modal>
+    </>
+  )
+}
+
+/* Waiting on: type a name, or @, to pick a real client or person. Anything else stays as plain words. */
+
+function WaitingOn({ task, text, setText, onBlur }: { task: Task; text: string; setText: (v: string) => void; onBlur: () => void }) {
+  const { updateTask } = useTasks()
+  const { clients, people } = useClients()
+  const search = useClientSearch()
+  const navigate = useNavigate()
+  const anchor = useRef<HTMLInputElement>(null)
+  const [focused, setFocused] = useState(false)
+  const person = people.find((p) => p.id === task.waiting_on_person_id)
+  const client = clients.find((c) => c.id === (person?.client_id ?? task.waiting_on_client_id))
+  const query = text.replace(/^@/, '')
+  const results = focused && (text.startsWith('@') || query.trim().length >= 2) ? search(query) : []
+
+  if (client) {
+    return (
+      <div className="flex flex-1 flex-wrap items-center gap-2">
+        <ConnectionChip
+          name={person ? `${person.name} · ${client.name}` : client.name}
+          business={!person && client.kind === 'business'}
+          onOpen={() => navigate(`/clients/${client.id}${person ? `?person=${person.id}` : ''}`)}
+          onRemove={() => updateTask(task.id, { waiting_on_person_id: null, waiting_on_client_id: null })}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-1 flex-col gap-1">
+      <input
+        ref={anchor}
+        aria-label="Waiting on"
+        placeholder="A person or a thing. Type @ to pick a client."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={onBlur}
+        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        className={`${inputCls} w-full`}
+      />
+      {results.length > 0 && (
+        <Floating anchor={anchor} onClose={() => setFocused(false)} height={260} width={320}>
+          <div className="flex max-h-64 flex-col overflow-y-auto p-1.5">
+            {results.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setText('')
+                  setFocused(false)
+                  updateTask(task.id, r.type === 'person' ? { waiting_on_person_id: r.id, waiting_on_client_id: null, waiting_on_text: '' } : { waiting_on_client_id: r.id, waiting_on_person_id: null, waiting_on_text: '' })
+                }}
+                className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-divider"
+              >
+                <Avatar name={r.name} business={r.business} size={26} />
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-[13px] font-medium">{r.name}</span>
+                  <span className="truncate text-xs text-muted">{r.sub}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </Floating>
+      )}
+    </div>
+  )
+}
+
+/* Connected to: chips for the clients and people this task is about, and + Connect. */
+
+function Connected({ taskId }: { taskId: string }) {
+  const { connections, clients, people, connect, disconnect } = useClients()
+  const navigate = useNavigate()
+  const mine = connections.filter((c) => c.from_id === taskId || c.to_id === taskId)
+  const ids = mine.map((c) => (c.from_id === taskId ? c.to_id : c.from_id))
+  return (
+    <>
+      {mine.map((c) => {
+        const id = c.from_id === taskId ? c.to_id : c.from_id
+        const client = clients.find((x) => x.id === id)
+        const person = people.find((x) => x.id === id)
+        const owner = person ? clients.find((x) => x.id === person.client_id) : client
+        if (!owner) return null
+        return (
+          <ConnectionChip
+            key={c.id}
+            name={person ? person.name : owner.name}
+            business={!person && owner.kind === 'business'}
+            onOpen={() => navigate(`/clients/${owner.id}${person ? `?person=${person.id}` : ''}`)}
+            onRemove={() => disconnect(c.id)}
+          />
+        )
+      })}
+      <ConnectPicker exclude={ids} onPick={(item) => connect({ type: 'task', id: taskId }, item)}>
+        {({ toggle, anchor }) => (
+          <button ref={anchor} type="button" onClick={toggle} className="h-8 rounded-lg px-2 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
+            + Connect
+          </button>
+        )}
+      </ConnectPicker>
     </>
   )
 }

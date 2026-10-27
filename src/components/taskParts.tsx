@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { diffDays, formatDate, formatTime } from '../lib/dates'
+import type { StageApi } from '../lib/clients'
 import { priorityStyles, statusColors, useTasks, type Priority, type Status, type Task } from '../lib/tasks'
 import { Button, MenuItem, Modal, Pill, Popover, useToast } from './ui'
 
@@ -85,8 +86,9 @@ export function DueText({ task, today, done }: { task: Task; today: string; done
 
 /* Status picker: a pill you click to change the status. The last item opens the stage editor. */
 
-export function StatusPicker({ status, onPick, onEdit }: { status: Status; onPick: (id: string) => void; onEdit: () => void }) {
-  const { statuses } = useTasks()
+export function StatusPicker({ status, onPick, onEdit, options }: { status: Status; onPick: (id: string) => void; onEdit: () => void; options?: Status[] }) {
+  const tasksApi = useTasks()
+  const statuses = options ?? tasksApi.statuses
   return (
     <Popover
       trigger={({ toggle, open }) => (
@@ -132,8 +134,11 @@ export function StatusPicker({ status, onPick, onEdit }: { status: Status; onPic
 
 /* Stage editor: rename, recolor, reorder, add and remove statuses without leaving the page. */
 
-export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { statuses, addStatus, updateStatus, moveStatus, deleteStatus } = useTasks()
+export function StatusEditor({ open, onClose, api }: { open: boolean; onClose: () => void; api?: StageApi }) {
+  const tasksApi = useTasks()
+  const { statuses, addStatus, updateStatus, moveStatus, deleteStatus } = api ?? tasksApi
+  const required = statuses.filter((s) => s.built_in).map((s) => s.name)
+  const requiredText = required.length > 1 ? `${required.slice(0, -1).join(', ')}${required.length > 2 ? ',' : ''} and ${required[required.length - 1]} are` : `${required[0]} is`
   const toast = useToast()
   const [colorFor, setColorFor] = useState<string | null>(null)
 
@@ -163,14 +168,14 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
       title="Edit stages"
       footer={
         <>
-          <Button size="sm" onClick={addStatus}>
+          <Button size="sm" onClick={() => addStatus()}>
             + Add a stage
           </Button>
           <span className="text-xs text-faint">Saved automatically</span>
         </>
       }
     >
-      <p className="mb-3 text-[13px] text-muted">Rename a stage, change its color, or put the stages in the order you work. Done, Canceled, and Waiting are required, but you can rename and recolor them.</p>
+      <p className="mb-3 text-[13px] text-muted">Rename a stage, change its color, or put the stages in the order you work.{required.length > 0 && ` ${requiredText} required, but you can rename and recolor them.`}</p>
       <div className="flex flex-col">
         {statuses.map((s, i) => (
           <div key={s.id} className="flex flex-col gap-2 border-t border-divider py-2 first:border-t-0">
@@ -208,7 +213,7 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
                   type="button"
                   className="w-16 text-center text-xs text-[#B3261E] hover:underline"
                   onClick={async () => {
-                    if (!(await deleteStatus(s.id))) toast('Some tasks still use that stage. Move them first.')
+                    if (!(await deleteStatus(s.id))) toast(`Some ${api?.noun ?? 'tasks'} still use that stage. Move them first.`)
                   }}
                 >
                   Delete

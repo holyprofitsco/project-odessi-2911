@@ -1,28 +1,9 @@
 import { Card, CardHeader, CardRow, Dropdown, Switch } from '../../components/ui'
 import { GripIcon } from '../../components/icons'
 import { useAreaOrder } from '../../lib/areas'
+import { timeZones } from '../../lib/timeZones'
 import { useWorkspace } from '../../lib/workspace'
 import { SettingsTitle } from './SettingsLayout'
-
-const timeZones = [
-  ['America/New_York', 'Eastern'],
-  ['America/Chicago', 'Central'],
-  ['America/Denver', 'Mountain'],
-  ['America/Phoenix', 'Arizona'],
-  ['America/Los_Angeles', 'Pacific'],
-  ['America/Anchorage', 'Alaska'],
-  ['Pacific/Honolulu', 'Hawaii'],
-  ['America/Toronto', 'Toronto'],
-  ['Europe/London', 'London'],
-  ['Europe/Paris', 'Paris'],
-  ['Africa/Lagos', 'Lagos'],
-  ['Asia/Dubai', 'Dubai'],
-  ['Asia/Kolkata', 'India'],
-  ['Asia/Singapore', 'Singapore'],
-  ['Asia/Tokyo', 'Tokyo'],
-  ['Australia/Sydney', 'Sydney'],
-  ['UTC', 'UTC'],
-].map(([value, label]) => ({ value, label }))
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (

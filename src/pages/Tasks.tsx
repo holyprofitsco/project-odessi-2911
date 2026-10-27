@@ -6,10 +6,11 @@ import { DatePicker } from '../components/pickers'
 import { Button, Card, Dropdown, EmptyState, MenuItem, Modal, MoreMenu, Popover, useToast } from '../components/ui'
 import { addDays, describeRepeat, diffDays, formatDate, weekdayNames, weekdayOf } from '../lib/dates'
 import { priorityRank, priorityStyles, useTasks, type Priority, type Task } from '../lib/tasks'
+import { useClientInfo } from '../lib/clientInfo'
 import { useWorkspace } from '../lib/workspace'
 
 type Tab = 'today' | 'upcoming' | 'all'
-type Group = 'time' | 'status' | 'none'
+type Group = 'time' | 'status' | 'client' | 'none'
 type Sort = 'due' | 'priority' | 'name' | 'created' | 'manual'
 type BoardGroup = 'status' | 'priority' | 'due'
 
@@ -110,6 +111,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
   const { today, statuses, statusById, setStatus, firstOpenStatus, addTask, setOrder } = useTasks()
   const { workspace } = useWorkspace()
   const toast = useToast()
+  const { clientFor } = useClientInfo()
   const visible = useVisibleTasks()
   const [tab, setTab] = useState<Tab>(() => readPref('odessi:tasks:tab', 'today'))
   const [group, setGroup] = useState<Group>(() => readPref('odessi:tasks:group', 'time'))
@@ -145,7 +147,12 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
   const sections: { key: string; title: string; tasks: Task[] }[] = []
   const push = (key: string, title: string, tasks: Task[]) => tasks.length && sections.push({ key, title, tasks })
 
-  if (group === 'status') {
+  if (group === 'client') {
+    const named = open.map((t) => ({ t, c: clientFor(t) }))
+    const seen = [...new Map(named.filter((x) => x.c).map((x) => [x.c!.id, x.c!])).values()].sort((a, b) => a.name.localeCompare(b.name))
+    for (const c of seen) push(c.id, c.name || 'Untitled', named.filter((x) => x.c?.id === c.id).map((x) => x.t))
+    push('none', 'No client', named.filter((x) => !x.c).map((x) => x.t))
+  } else if (group === 'status') {
     for (const s of statuses.filter((s) => s.behavior === 'open' || s.behavior === 'waiting')) push(s.id, s.name, open.filter((t) => t.status_id === s.id))
   } else if (group === 'time' && tab === 'today') {
     const isWaiting = (t: Task) => behavior(t) === 'waiting'
@@ -249,6 +256,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
           options={[
             { value: 'time', label: tab === 'today' ? 'Time of day' : 'Date' },
             { value: 'status', label: 'Status' },
+            { value: 'client', label: 'Client' },
             { value: 'none', label: 'None' },
           ]}
           onChange={(g) => {
@@ -301,7 +309,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             )}
             <Card>
               {s.tasks.map((t) => (
-                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} />
+                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} showClient={group !== 'client'} />
               ))}
             </Card>
           </div>
@@ -443,6 +451,7 @@ function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
 function TaskRow({
   task,
   showStatus,
+  showClient = true,
   selected,
   anySelected,
   dragging,
@@ -455,6 +464,7 @@ function TaskRow({
 }: {
   task: Task
   showStatus: boolean
+  showClient?: boolean
   selected: boolean
   anySelected: boolean
   dragging: boolean
@@ -467,13 +477,16 @@ function TaskRow({
 }) {
   const { statusById, tasks, today } = useTasks()
   const { workspace } = useWorkspace()
+  const { waitingName, clientFor } = useClientInfo()
   const status = statusById(task.status_id)
   if (!status) return null
+  const who = waitingName(task)
+  const client = showClient ? clientFor(task) : undefined
   const done = status.behavior === 'done'
   const subs = tasks.filter((t) => t.parent_task_id === task.id)
   const subsDone = subs.filter((s) => statusById(s.status_id)?.behavior === 'done').length
   const since = task.waiting_since ? (diffDays(today, task.waiting_since) < 7 ? weekdayNames[weekdayOf(task.waiting_since)].slice(0, 3) : formatDate(task.waiting_since, today)) : 'today'
-  const waitingLine = status.behavior === 'waiting' ? `Waiting${task.waiting_on_text ? ` on ${task.waiting_on_text}` : ''} since ${since}` : null
+  const waitingLine = status.behavior === 'waiting' ? `Waiting${who ? ` on ${who}` : ''} since ${since}` : null
 
   return (
     <div
@@ -510,8 +523,9 @@ function TaskRow({
       <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={() => onToggle(task)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
-        {(waitingLine || subs.length > 0 || task.repeat_rule) && (
+        {(waitingLine || subs.length > 0 || task.repeat_rule || client) && (
           <span className="flex items-center gap-2 text-xs text-faint">
+            {client && <span className="shrink-0 truncate text-muted">{client.name}</span>}
             {waitingLine && (
               <span className="truncate text-waiting" title={waitingLine}>
                 {waitingLine}

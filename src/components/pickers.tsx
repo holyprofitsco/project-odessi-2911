@@ -4,7 +4,7 @@ import { addDays, formatDate, formatTime, hhmm, monthNames, weekdayNames, weekda
 
 // On-brand date and time pickers. Both open in a floating panel that is never clipped by a pop-up's scroll area.
 
-function Floating({ anchor, onClose, height, width, children }: { anchor: RefObject<HTMLElement | null>; onClose: () => void; height: number; width: number; children: ReactNode }) {
+export function Floating({ anchor, onClose, height, width, children }: { anchor: RefObject<HTMLElement | null>; onClose: () => void; height: number; width: number; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null)
 

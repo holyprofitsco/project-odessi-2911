@@ -3,8 +3,12 @@ import AppShell from './components/AppShell'
 import { ToastProvider } from './components/ui'
 import { areas } from './lib/areas'
 import { AuthProvider, useAuth } from './lib/auth'
+import { ClientsProvider } from './lib/clients'
 import { TasksProvider } from './lib/tasks'
 import { WorkspaceProvider } from './lib/workspace'
+import ClientPage from './pages/ClientPage'
+import Clients from './pages/Clients'
+import ClientsSettings from './pages/settings/ClientsSettings'
 import Home from './pages/Home'
 import Placeholder from './pages/Placeholder'
 import SignIn from './pages/SignIn'
@@ -19,7 +23,6 @@ const laterSettings: [string, string][] = [
   ['nudges', 'Nudges and notifications'],
   ['content', 'Content'],
   ['projects', 'Projects'],
-  ['clients', 'Clients'],
   ['connections', 'Connections'],
   ['team', 'Team'],
   ['billing', 'Billing'],
@@ -33,11 +36,15 @@ function Gate() {
     <WorkspaceProvider>
       <ToastProvider>
         <TasksProvider>
+        <ClientsProvider>
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<Home />} />
             <Route path="/tasks/*" element={<Tasks />} />
-            {areas.filter((a) => a.key !== 'tasks').map((a) => (
+            <Route path="/clients" element={<Clients />} />
+            <Route path="/clients/board" element={<Clients />} />
+            <Route path="/clients/:id" element={<ClientPage />} />
+            {areas.filter((a) => a.key !== 'tasks' && a.key !== 'clients').map((a) => (
               <Route key={a.key} path={`${a.path}/*`} element={<Placeholder title={a.label} stage={a.stage} />} />
             ))}
             <Route path="/automations" element={<Placeholder title="Automations" stage={7} />} />
@@ -48,6 +55,7 @@ function Gate() {
               <Route path="profile" element={<Profile />} />
               <Route path="general" element={<General />} />
               <Route path="tasks" element={<TasksSettings />} />
+              <Route path="clients" element={<ClientsSettings />} />
               {laterSettings.map(([slug, title]) => (
                 <Route key={slug} path={slug} element={<SettingsLater title={title} />} />
               ))}
@@ -55,6 +63,7 @@ function Gate() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
+        </ClientsProvider>
         </TasksProvider>
       </ToastProvider>
     </WorkspaceProvider>

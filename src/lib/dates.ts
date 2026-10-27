@@ -146,3 +146,18 @@ export function formatTime(time: string) {
 }
 
 export const hhmm = (time: string) => time.slice(0, 5)
+
+// "Oct 21" (adds the year when it isn't this year).
+export function shortDate(iso: string, today: string) {
+  const d = toUTC(iso)
+  const label = `${monthNames[d.getUTCMonth()]} ${d.getUTCDate()}`
+  return d.getUTCFullYear() === Number(today.slice(0, 4)) ? label : `${label}, ${d.getUTCFullYear()}`
+}
+
+// "today", "yesterday", "3 days ago"
+export function daysAgo(iso: string, today: string) {
+  const n = diffDays(today, iso)
+  if (n <= 0) return 'today'
+  if (n === 1) return 'yesterday'
+  return `${n} days ago`
+}

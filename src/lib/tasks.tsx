@@ -32,6 +32,8 @@ export type Task = {
   // The date this repeat was meant for, before any weekend move. Next dates count from it so the schedule never drifts.
   repeat_anchor: string | null
   waiting_on_text: string
+  waiting_on_client_id: string | null
+  waiting_on_person_id: string | null
   waiting_since: string | null
   waiting_check_in: string | null
   order_in_group: number
@@ -197,13 +199,15 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       if (!next || !prev || next.id === prev.id) return
       const changes: Partial<Task> = { status_id: statusId, done_at: next.behavior === 'done' ? new Date().toISOString() : null }
       if (next.behavior === 'waiting') changes.waiting_since = task.waiting_since ?? today
-      else if (prev.behavior === 'waiting') Object.assign(changes, { waiting_since: null, waiting_check_in: null, waiting_on_text: '' })
+      else if (prev.behavior === 'waiting') Object.assign(changes, { waiting_since: null, waiting_check_in: null, waiting_on_text: '', waiting_on_client_id: null, waiting_on_person_id: null })
       const snapshot: Partial<Task> = {
         status_id: task.status_id,
         done_at: task.done_at,
         waiting_since: task.waiting_since,
         waiting_check_in: task.waiting_check_in,
         waiting_on_text: task.waiting_on_text,
+        waiting_on_client_id: task.waiting_on_client_id,
+        waiting_on_person_id: task.waiting_on_person_id,
       }
       await updateTask(task.id, changes)
 
