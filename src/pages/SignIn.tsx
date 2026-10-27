@@ -101,7 +101,7 @@ export default function SignIn() {
           {mode === 'check-email' ? (
             <>
               <p className="mt-2 text-muted">{sentMessage}</p>
-              <button onClick={() => switchTo('sign-in')} className="mt-5 text-sm font-medium text-ink hover:underline">
+              <button onClick={() => switchTo('sign-in')} className="mt-5 text-sm font-medium text-accent hover:underline">
                 Back to sign in
               </button>
             </>
@@ -166,7 +166,7 @@ export default function SignIn() {
           {mode === 'sign-in' && (
             <>
               New here?{' '}
-              <button onClick={() => switchTo('sign-up')} className="font-medium text-ink hover:underline">
+              <button onClick={() => switchTo('sign-up')} className="font-medium text-accent hover:underline">
                 Create an account
               </button>
             </>
@@ -174,7 +174,7 @@ export default function SignIn() {
           {(mode === 'sign-up' || mode === 'forgot') && (
             <>
               Already have an account?{' '}
-              <button onClick={() => switchTo('sign-in')} className="font-medium text-ink hover:underline">
+              <button onClick={() => switchTo('sign-in')} className="font-medium text-accent hover:underline">
                 Sign in
               </button>
             </>
