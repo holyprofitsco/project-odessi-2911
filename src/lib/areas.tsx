@@ -48,58 +48,51 @@ export function useAreaOrder() {
     hold.current = null
   }
 
-  const finish = () => {
-    if (draft && draft.some((a, i) => a !== saved[i])) updateWorkspace({ areas_order: draft.map((a) => a.key) })
-    justDropped.current = true
-    setDraft(null)
-    setDragging(null)
+  // Once the hold finishes, follow the pointer on the whole window until it lets go.
+  const startDrag = (key: Area['key']) => {
+    let order = saved
+    setDragging(key)
+    setDraft(order)
+
+    const onMove = (e: globalThis.PointerEvent) => {
+      const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-area]')?.getAttribute('data-area')
+      const from = order.findIndex((a) => a.key === key)
+      const to = order.findIndex((a) => a.key === over)
+      if (to === -1 || to === from) return
+      order = [...order]
+      order.splice(to, 0, ...order.splice(from, 1))
+      setDraft(order)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (order.some((a, i) => a !== saved[i])) updateWorkspace({ areas_order: order.map((a) => a.key) })
+      justDropped.current = true
+      setDraft(null)
+      setDragging(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   const dragProps = (key: Area['key']) => ({
     'data-area': key,
     onPointerDown: (e: PointerEvent<HTMLElement>) => {
       if (e.button !== 0) return
+      // Stops the browser's own link drag and text selection. A quick click still goes through.
+      if (e.pointerType === 'mouse') e.preventDefault()
       justDropped.current = false
-      const el = e.currentTarget
-      const id = e.pointerId
       cancelHold()
-      hold.current = {
-        x: e.clientX,
-        y: e.clientY,
-        timer: window.setTimeout(() => {
-          hold.current = null
-          el.setPointerCapture(id)
-          setDragging(key)
-          setDraft(saved)
-        }, HOLD_MS),
-      }
+      hold.current = { x: e.clientX, y: e.clientY, timer: window.setTimeout(() => (hold.current = null, startDrag(key)), HOLD_MS) }
     },
     onPointerMove: (e: PointerEvent<HTMLElement>) => {
-      if (hold.current) {
-        // Moving before the hold finishes is a normal click or scroll, not a drag.
-        if (Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 6) cancelHold()
-        return
-      }
-      if (dragging !== key) return
-      const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-area]')?.getAttribute('data-area')
-      if (!over || over === key) return
-      setDraft((current) => {
-        const next = [...(current ?? saved)]
-        const from = next.findIndex((a) => a.key === key)
-        const to = next.findIndex((a) => a.key === over)
-        if (to === -1) return current
-        next.splice(to, 0, ...next.splice(from, 1))
-        return next
-      })
+      // Moving before the hold finishes is a normal click or scroll, not a drag.
+      if (hold.current && Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 6) cancelHold()
     },
-    onPointerUp: () => {
-      cancelHold()
-      if (dragging === key) finish()
-    },
-    onPointerCancel: () => {
-      cancelHold()
-      if (dragging === key) finish()
-    },
+    onPointerUp: cancelHold,
+    onPointerLeave: cancelHold,
     // A drop shouldn't also count as a click that opens the area.
     onClickCapture: (e: MouseEvent) => {
       if (!justDropped.current) return
@@ -107,7 +100,6 @@ export function useAreaOrder() {
       e.preventDefault()
       e.stopPropagation()
     },
-    // Links and images have their own browser drag. Turn it off so the hold-and-drag above is the only one.
     onDragStart: (e: DragEvent) => e.preventDefault(),
   })
 
