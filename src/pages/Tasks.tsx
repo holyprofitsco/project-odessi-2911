@@ -608,6 +608,9 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
       .map((s) => ({ key: s.id, head: <StatusPill status={s} />, tasks: visible.filter((t) => t.status_id === s.id).sort(byDue), drop: (t) => setStatus(t, s.id), add: { status_id: s.id }, stage: true }))
   }
 
+  // Columns you can't drop onto (Past due, Later) only show while they hold something.
+  columns = columns.filter((c) => c.drop || c.tasks.length > 0)
+
   const drop = (e: DragEvent, col: { key: string; drop?: (t: Task) => void }) => {
     e.preventDefault()
     setOverId(null)
