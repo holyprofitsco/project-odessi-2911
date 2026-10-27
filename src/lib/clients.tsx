@@ -141,6 +141,41 @@ type ClientsState = StageApi & {
   removeFile: (id: string) => Promise<void>
 }
 
+// Big pictures shrunk in one jump look jagged, so halve them step by step down to 320px before saving.
+async function shrinkImage(file: File): Promise<Blob> {
+  if (file.type === 'image/gif') return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const target = 320
+    let w = bitmap.width
+    let h = bitmap.height
+    let source: CanvasImageSource = bitmap
+    if (Math.max(w, h) <= target) return file
+    while (Math.max(w, h) / 2 >= target) {
+      const c = document.createElement('canvas')
+      c.width = Math.round(w / 2)
+      c.height = Math.round(h / 2)
+      const ctx = c.getContext('2d')!
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(source, 0, 0, c.width, c.height)
+      source = c
+      w = c.width
+      h = c.height
+    }
+    const scale = target / Math.max(w, h)
+    const out = document.createElement('canvas')
+    out.width = Math.round(w * scale)
+    out.height = Math.round(h * scale)
+    const ctx = out.getContext('2d')!
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(source, 0, 0, out.width, out.height)
+    const type = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+    return await new Promise((resolve) => out.toBlob((b) => resolve(b ?? file), type, 0.9))
+  } catch {
+    return file
+  }
+}
+
 const ClientsContext = createContext<ClientsState | null>(null)
 
 export const newOptionId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2))
@@ -438,9 +473,10 @@ export function ClientsProvider({ children }: { children: ReactNode }) {
         toast('That picture is over 5 MB. Try a smaller one.')
         return null
       }
-      const ext = (file.name.split('.').pop() || 'png').toLowerCase()
+      const small = await shrinkImage(file)
+      const ext = small.type === 'image/jpeg' ? 'jpg' : 'png'
       const path = `${workspaceId}/${newOptionId()}.${ext}`
-      const { error } = await supabase.storage.from('photos').upload(path, file, { contentType: file.type })
+      const { error } = await supabase.storage.from('photos').upload(path, small, { contentType: small.type })
       if (error) {
         toast("Couldn't upload that picture. Try a PNG or JPG.")
         return null

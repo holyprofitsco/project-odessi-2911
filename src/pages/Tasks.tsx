@@ -328,7 +328,6 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={() => setShowResting(!showResting)} className="w-fit px-1 text-[13px] font-medium text-muted hover:text-ink">
             {showResting ? '⌄' : '›'} Waiting on others · {resting.length}
-            <span className="font-normal text-faint"> · they show up here on their check-in day</span>
           </button>
           {showResting && (
             <Card>

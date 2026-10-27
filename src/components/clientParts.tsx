@@ -14,7 +14,16 @@ import { Button, Dropdown, MenuItem, Modal, Pill, Popover } from './ui'
 
 export function Avatar({ name, business, size = 36, photo }: { name: string; business?: boolean; size?: number; photo?: string | null }) {
   if (photo) {
-    return <img src={photo} alt="" aria-hidden="true" className={`shrink-0 object-cover ${business ? 'rounded-[28%] border border-border' : 'rounded-full'}`} style={{ width: size, height: size }} />
+    // Logos sit whole on white with a little room. Faces fill the circle.
+    return (
+      <img
+        src={photo}
+        alt=""
+        aria-hidden="true"
+        className={`shrink-0 ${business ? 'rounded-[28%] border border-border bg-white object-contain p-[8%]' : 'rounded-full object-cover'}`}
+        style={{ width: size, height: size, imageRendering: 'auto' }}
+      />
+    )
   }
   return (
     <span

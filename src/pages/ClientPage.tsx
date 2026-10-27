@@ -9,7 +9,7 @@ import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu } from '../components
 import { firstName, useClientInfo } from '../lib/clientInfo'
 import { formatPhone, noteKindLabel, noteKinds, useClients, type Client, type Field, type NoteKind } from '../lib/clients'
 import { formatDate, formatTime, shortDate } from '../lib/dates'
-import { useTasks } from '../lib/tasks'
+import { useTasks, type Task } from '../lib/tasks'
 import { timeZones, zoneLabel } from '../lib/timeZones'
 import { useWorkspace } from '../lib/workspace'
 
@@ -113,7 +113,7 @@ function Page({ client }: { client: Client }) {
 
       <div className="grid grid-cols-[minmax(0,1fr)_360px] items-start gap-6">
         <div className="flex min-w-0 flex-col gap-6">
-          <TopBoxes client={client} />
+          <TopBoxes client={client} onOpenTask={openTask} />
           <OpenTasks client={client} onOpen={openTask} />
           <NotesSection client={client} onOpenTask={openTask} />
         </div>
@@ -162,25 +162,30 @@ function Page({ client }: { client: Client }) {
 
 /* The three boxes: when do I see them next, what am I waiting on, when did we last talk. */
 
-function Box({ label, warm, children }: { label: string; warm?: boolean; children: ReactNode }) {
+function Box({ label, warm, children, onClick }: { label: string; warm?: boolean; children: ReactNode; onClick?: () => void }) {
   return (
-    <Card className="flex min-h-[86px] flex-col gap-1 px-4 py-3">
-      <span className={`text-xs font-semibold ${warm ? 'text-waiting' : 'text-muted'}`}>{label}</span>
-      {children}
+    <Card className={`flex min-h-[86px] min-w-0 flex-col gap-1 px-4 py-3 ${onClick ? 'cursor-pointer transition-shadow hover:shadow-[0_4px_14px_rgba(20,20,30,0.1)]' : ''}`}>
+      <div role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined} onClick={onClick} onKeyDown={(e) => onClick && e.key === 'Enter' && onClick()} className="flex min-w-0 flex-col gap-1 focus-visible:outline-none">
+        <span className={`text-xs font-semibold ${warm ? 'text-waiting' : 'text-muted'}`}>{label}</span>
+        {children}
+      </div>
     </Card>
   )
 }
 
-function TopBoxes({ client }: { client: Client }) {
+function TopBoxes({ client, onOpenTask }: { client: Client; onOpenTask: (id: string) => void }) {
   const { today, people, stageById } = useClients()
-  const { nextUp, waitingOn, lastContact } = useClientInfo()
+  const { nextUp, waitingList, waitingName, lastContact } = useClientInfo()
+  const [showAll, setShowAll] = useState(false)
   const next = nextUp(client)
-  const waiting = waitingOn(client)
+  const waiting = waitingList(client)
+  const first = waiting[0]
   const last = lastContact(client.id)
   const lastWith = people.find((p) => p.id === last?.person_id)
+  const since = (t: Task) => waitingSince(t, today).replace('Waiting since', 'since')
   return (
     <div className="grid grid-cols-3 gap-4">
-      <Box label="Next up">
+      <Box label="Next up" onClick={next ? () => onOpenTask(next.id) : undefined}>
         {next ? (
           <>
             <span className="truncate text-sm font-semibold">{next.title}</span>
@@ -193,11 +198,27 @@ function TopBoxes({ client }: { client: Client }) {
           <span className="text-[13px] text-faint">Nothing planned yet</span>
         )}
       </Box>
-      <Box label={waiting?.who ? `Waiting on · ${waiting.who}` : 'Waiting on'} warm={!!waiting}>
-        {waiting ? (
+      <Box label="Waiting on" warm={!!first} onClick={first ? () => onOpenTask(first.id) : undefined}>
+        {first ? (
           <>
-            <span className="truncate text-sm font-semibold">{waiting.task.title}</span>
-            <span className="text-[13px] text-muted">{waitingSince(waiting.task, today).replace('Waiting since', 'Since')}</span>
+            <span className="truncate text-sm font-semibold">
+              {waitingName(first) || first.title} <span className="font-normal text-muted">{since(first)}</span>
+            </span>
+            <span className="flex items-center gap-2 text-[13px] text-muted">
+              <span className="truncate">{waitingName(first) ? first.title : ''}</span>
+              {waiting.length > 1 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setShowAll(true)
+                  }}
+                  className="ml-auto shrink-0 rounded-md px-1.5 font-medium text-waiting hover:bg-[#FDF5EC]"
+                >
+                  +{waiting.length - 1} more
+                </button>
+              )}
+            </span>
           </>
         ) : (
           <span className="text-[13px] text-faint">Nothing right now</span>
@@ -218,6 +239,26 @@ function TopBoxes({ client }: { client: Client }) {
           <span className="text-[13px] text-faint">No notes yet</span>
         )}
       </Box>
+      <Modal open={showAll} onClose={() => setShowAll(false)} title={`Waiting on, for ${client.name}`}>
+        <div className="flex flex-col rounded-xl border border-border">
+          {waiting.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setShowAll(false)
+                onOpenTask(t.id)
+              }}
+              className="flex flex-col items-start gap-0.5 border-divider px-4 py-3 text-left hover:bg-[#FAFAFB] [&+&]:border-t"
+            >
+              <span className="text-sm font-semibold">{t.title}</span>
+              <span className="text-[13px] text-waiting">
+                Waiting on {waitingName(t) || 'something'} {since(t)}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -227,14 +268,13 @@ function TopBoxes({ client }: { client: Client }) {
 function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) => void }) {
   const { addTask, statusById } = useTasks()
   const { connect } = useClients()
-  const { tasksFor, personFor } = useClientInfo()
+  const { tasksFor } = useClientInfo()
   const [showDone, setShowDone] = useState(false)
   const [draft, setDraft] = useState('')
   const all = tasksFor(client).sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'))
   const open = all.filter((t) => statusById(t.status_id)?.behavior !== 'done')
   const done = all.filter((t) => statusById(t.status_id)?.behavior === 'done')
   const shown = showDone ? [...open, ...done] : open
-  const business = client.kind === 'business'
 
   const add = async () => {
     const title = draft.trim()
@@ -258,9 +298,7 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
       </div>
       <Card>
         {shown.map((t) => {
-          const p = personFor(t)
-          const waiting = statusById(t.status_id)?.behavior === 'waiting'
-          return <ClientTaskRow key={t.id} task={t} onOpen={onOpen} who={business ? (p ? (waiting ? firstName(p.name) : `To ${firstName(p.name)}`) : '') : undefined} />
+          return <ClientTaskRow key={t.id} task={t} onOpen={onOpen} />
         })}
         <div className="flex items-center border-divider px-[18px] [&:not(:first-child)]:border-t">
           <input

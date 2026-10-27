@@ -2,7 +2,11 @@ import { useCallback } from 'react'
 import { useClients, type Client, type Note, type Person } from './clients'
 import { useTasks, type Task } from './tasks'
 
-export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? ''
+// "Dana" from "Dana Whitfield". A title like "Dr." keeps the next word: "Dr. Anne".
+export const firstName = (name: string) => {
+  const words = name.trim().split(/\s+/)
+  return (words[0]?.endsWith('.') && words[1] ? `${words[0]} ${words[1]}` : words[0]) ?? ''
+}
 
 export const initials = (name: string) =>
   name
@@ -96,15 +100,22 @@ export function useClientInfo() {
     [tasksFor, isOpen],
   )
 
+  // Everything this client has you waiting, oldest first.
+  const waitingList = useCallback(
+    (client: Client) =>
+      tasksFor(client)
+        .filter(isWaiting)
+        .sort((a, b) => (a.waiting_since ?? '').localeCompare(b.waiting_since ?? '')),
+    [tasksFor, isWaiting],
+  )
+
   const waitingOn = useCallback(
     (client: Client) => {
-      const t = tasksFor(client)
-        .filter(isWaiting)
-        .sort((a, b) => (a.waiting_since ?? '').localeCompare(b.waiting_since ?? ''))[0]
+      const t = waitingList(client)[0]
       if (!t) return null
       return { task: t, who: waitingWho(t) }
     },
-    [tasksFor, isWaiting, waitingWho],
+    [waitingList, waitingWho],
   )
 
   const lastContact = useCallback((clientId: string) => notes.find((n) => n.client_id === clientId && n.kind !== 'stage') as Note | undefined, [notes])
@@ -124,5 +135,5 @@ export function useClientInfo() {
     [mainContact, fields, valueOf],
   )
 
-  return { peopleOf, mainContact, tasksFor, tasksForPerson, personFor, clientFor, waitingName, waitingWho, nextUp, waitingOn, lastContact, subline }
+  return { peopleOf, mainContact, tasksFor, tasksForPerson, personFor, clientFor, waitingName, waitingWho, waitingList, nextUp, waitingOn, lastContact, subline }
 }
