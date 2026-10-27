@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { addDays, formatDate, formatTime, hhmm, monthNames, weekdayNames } from '../lib/dates'
+import { addDays, formatDate, formatTime, hhmm, monthNames, weekdayNames, weekdayOf } from '../lib/dates'
 
 // On-brand date and time pickers. Both open in a floating panel that is never clipped by a pop-up's scroll area.
 
@@ -93,6 +93,13 @@ export function DatePicker({
     const d = new Date(Date.UTC(y, m - 1 + n, 1))
     setView(d.toISOString().slice(0, 7))
   }
+  const day = weekdayOf(today)
+  const quickPicks = [
+    { label: 'Today', date: today },
+    { label: 'Tomorrow', date: addDays(today, 1) },
+    { label: 'This weekend', date: addDays(today, (6 - day + 7) % 7 || 7) },
+    { label: 'Next week', date: addDays(today, (1 - day + 7) % 7 || 7) },
+  ]
   const pick = (d: string | null) => {
     onChange(d)
     close()
@@ -115,8 +122,8 @@ export function DatePicker({
         {value ? formatDate(value, today) : placeholder}
       </button>
       {open && (
-        <Floating anchor={anchor} onClose={close} height={360} width={288}>
-          <div className="flex flex-col gap-2 p-3">
+        <Floating anchor={anchor} onClose={close} height={420} width={316}>
+          <div className="flex flex-col gap-2 p-3 pb-2">
             <div className="flex items-center justify-between px-1">
               <span className="text-sm font-semibold">
                 {monthNames[m - 1]} {y}
@@ -158,23 +165,26 @@ export function DatePicker({
                 )
               })}
             </div>
-            <div className="flex items-center gap-1 border-t border-divider pt-2">
-              <button type="button" onClick={() => pick(today)} className="h-8 rounded-lg px-2.5 text-[13px] font-medium hover:bg-divider">
-                Today
-              </button>
-              <button type="button" onClick={() => pick(addDays(today, 1))} className="h-8 rounded-lg px-2.5 text-[13px] font-medium hover:bg-divider">
-                Tomorrow
-              </button>
-              <button type="button" onClick={() => pick(addDays(today, 7))} className="h-8 rounded-lg px-2.5 text-[13px] font-medium hover:bg-divider">
-                Next week
-              </button>
-              <div className="flex-1" />
-              {clearable && value && (
-                <button type="button" onClick={() => pick(null)} className="h-8 rounded-lg px-2.5 text-[13px] text-muted hover:bg-divider hover:text-ink">
-                  Clear
+          </div>
+          <div className="rounded-b-2xl border-t-[1.5px] border-field bg-[#FAFAFB] px-3 pt-2.5 pb-3">
+            <div className="flex flex-wrap gap-1.5">
+              {quickPicks.map((q) => (
+                <button
+                  key={q.label}
+                  type="button"
+                  title={formatDate(q.date, today)}
+                  onClick={() => pick(q.date)}
+                  className={`h-8 rounded-full border-[1.5px] px-3 text-[13px] font-medium ${q.date === value ? 'border-ink bg-ink text-white' : 'border-field bg-surface hover:bg-divider'}`}
+                >
+                  {q.label}
                 </button>
-              )}
+              ))}
             </div>
+            {clearable && value && (
+              <button type="button" onClick={() => pick(null)} className="mt-2 text-[13px] text-muted hover:text-ink">
+                Clear date
+              </button>
+            )}
           </div>
         </Floating>
       )}
