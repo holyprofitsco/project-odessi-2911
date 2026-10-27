@@ -35,11 +35,34 @@ type WorkspaceState = {
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null)
 
+// The last workspace and profile this browser saw, so a refresh paints your own settings right away
+// (area order, which areas are on) while the fresh copy loads.
+const cacheKey = (userId: string) => `odessi:workspace:${userId}`
+
+function readCache(userId: string | undefined): { workspace: Workspace | null; profile: Profile | null } {
+  try {
+    if (userId) return JSON.parse(localStorage.getItem(cacheKey(userId)) ?? '')
+  } catch {
+    // No cache yet, or storage is blocked. Load from the database as usual.
+  }
+  return { workspace: null, profile: null }
+}
+
 // Loads the signed-in person's profile and workspace. Updates show right away and save in the background.
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth()
-  const [workspace, setWorkspace] = useState<Workspace | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
+  const userId = session?.user.id
+  const [workspace, setWorkspace] = useState<Workspace | null>(() => readCache(userId).workspace)
+  const [profile, setProfile] = useState<Profile | null>(() => readCache(userId).profile)
+
+  useEffect(() => {
+    if (!userId || !workspace || !profile) return
+    try {
+      localStorage.setItem(cacheKey(userId), JSON.stringify({ workspace, profile }))
+    } catch {
+      // Storage is blocked. Nothing to do: the app still works, it just loads fresh each time.
+    }
+  }, [userId, workspace, profile])
 
   useEffect(() => {
     if (!session) return

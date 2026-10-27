@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType, type DragEvent } from 'react'
+import { useMemo, useRef, useState, type ComponentType, type DragEvent, type MouseEvent, type PointerEvent } from 'react'
 import { ClientsIcon, ContentIcon, DocsIcon, ProjectsIcon, TasksIcon } from '../components/icons'
 import { useWorkspace, type AreaKey } from './workspace'
 
@@ -30,42 +30,85 @@ export function sortAreas(order: string[]) {
   return [...areas].sort((a, b) => rank(a) - rank(b))
 }
 
-// Drag to reorder areas. The list moves live while dragging and saves on drop.
-// The sidebar and Settings both read the same saved order, so they stay in sync.
+// Press and hold anywhere on an area, then drag it up or down. A quick click still opens it.
+// The list moves live while dragging and saves on drop. The sidebar and Settings read the same saved order, so they stay in sync.
+const HOLD_MS = 250
+
 export function useAreaOrder() {
   const { workspace, updateWorkspace } = useWorkspace()
   const saved = useMemo(() => sortAreas(workspace?.areas_order ?? []), [workspace?.areas_order])
   const [draft, setDraft] = useState<Area[] | null>(null)
   const [dragging, setDragging] = useState<Area['key'] | null>(null)
+  const hold = useRef<{ timer: number; x: number; y: number } | null>(null)
+  const justDropped = useRef(false)
   const list = draft ?? saved
 
+  const cancelHold = () => {
+    if (hold.current) window.clearTimeout(hold.current.timer)
+    hold.current = null
+  }
+
+  const finish = () => {
+    if (draft && draft.some((a, i) => a !== saved[i])) updateWorkspace({ areas_order: draft.map((a) => a.key) })
+    justDropped.current = true
+    setDraft(null)
+    setDragging(null)
+  }
+
   const dragProps = (key: Area['key']) => ({
-    draggable: true,
-    onDragStart: (e: DragEvent) => {
-      e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', key)
-      setDragging(key)
-      setDraft(saved)
+    'data-area': key,
+    onPointerDown: (e: PointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return
+      justDropped.current = false
+      const el = e.currentTarget
+      const id = e.pointerId
+      cancelHold()
+      hold.current = {
+        x: e.clientX,
+        y: e.clientY,
+        timer: window.setTimeout(() => {
+          hold.current = null
+          el.setPointerCapture(id)
+          setDragging(key)
+          setDraft(saved)
+        }, HOLD_MS),
+      }
     },
-    onDragEnter: () => {
-      if (!dragging || dragging === key) return
+    onPointerMove: (e: PointerEvent<HTMLElement>) => {
+      if (hold.current) {
+        // Moving before the hold finishes is a normal click or scroll, not a drag.
+        if (Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 6) cancelHold()
+        return
+      }
+      if (dragging !== key) return
+      const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-area]')?.getAttribute('data-area')
+      if (!over || over === key) return
       setDraft((current) => {
         const next = [...(current ?? saved)]
-        const from = next.findIndex((a) => a.key === dragging)
-        const to = next.findIndex((a) => a.key === key)
+        const from = next.findIndex((a) => a.key === key)
+        const to = next.findIndex((a) => a.key === over)
+        if (to === -1) return current
         next.splice(to, 0, ...next.splice(from, 1))
         return next
       })
     },
-    onDragOver: (e: DragEvent) => {
-      if (dragging) e.preventDefault()
+    onPointerUp: () => {
+      cancelHold()
+      if (dragging === key) finish()
     },
-    onDrop: (e: DragEvent) => e.preventDefault(),
-    onDragEnd: () => {
-      if (draft && draft.some((a, i) => a !== saved[i])) updateWorkspace({ areas_order: draft.map((a) => a.key) })
-      setDraft(null)
-      setDragging(null)
+    onPointerCancel: () => {
+      cancelHold()
+      if (dragging === key) finish()
     },
+    // A drop shouldn't also count as a click that opens the area.
+    onClickCapture: (e: MouseEvent) => {
+      if (!justDropped.current) return
+      justDropped.current = false
+      e.preventDefault()
+      e.stopPropagation()
+    },
+    // Links and images have their own browser drag. Turn it off so the hold-and-drag above is the only one.
+    onDragStart: (e: DragEvent) => e.preventDefault(),
   })
 
   return { list, dragging, dragProps }

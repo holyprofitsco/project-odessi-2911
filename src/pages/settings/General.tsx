@@ -49,10 +49,10 @@ export default function General() {
       <Card>
         <CardHeader
           title="Areas"
-          description="Turn off what you don't use, and drag to change the order. Nothing gets deleted: turn an area back on and everything is right where you left it."
+          description="Turn off what you don't use, and press and hold to drag them into a new order. Nothing gets deleted: turn an area back on and everything is right where you left it."
         />
         {list.map((a) => (
-          <CardRow key={a.key} {...dragProps(a.key)} className={['group relative', dragging === a.key ? 'opacity-40' : ''].join(' ')}>
+          <CardRow key={a.key} {...dragProps(a.key)} className={['group relative select-none', dragging === a.key ? 'z-10 cursor-grabbing bg-surface shadow-[0_4px_14px_rgba(20,20,30,0.12)]' : ''].join(' ')}>
             <span className="absolute top-1/2 left-1 -translate-y-1/2 cursor-grab text-faint opacity-0 group-hover:opacity-100">
               <GripIcon />
             </span>
