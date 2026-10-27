@@ -1,14 +1,17 @@
-import { useMemo, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import TaskModal from '../components/TaskModal'
 import { Checkbox, DueText, PriorityPill, RepeatIcon, StatusEditor, StatusPill } from '../components/taskParts'
-import { Button, Card, Dropdown, EmptyState, MenuItem, MoreMenu } from '../components/ui'
-import { describeRepeat, diffDays, formatDate, weekdayNames, weekdayOf } from '../lib/dates'
-import { useTasks, type Status, type Task } from '../lib/tasks'
+import { DatePicker } from '../components/pickers'
+import { Button, Card, Dropdown, EmptyState, MenuItem, Modal, MoreMenu, Popover, useToast } from '../components/ui'
+import { addDays, describeRepeat, diffDays, formatDate, weekdayNames, weekdayOf } from '../lib/dates'
+import { priorityRank, priorityStyles, useTasks, type Priority, type Task } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
 
 type Tab = 'today' | 'upcoming' | 'all'
 type Group = 'time' | 'status' | 'none'
+type Sort = 'due' | 'priority' | 'name' | 'created' | 'manual'
+type BoardGroup = 'status' | 'priority' | 'due'
 
 const readPref = <T extends string>(key: string, fallback: T) => {
   try {
@@ -95,14 +98,35 @@ function byDue(a: Task, b: Task) {
 
 /* List view */
 
+const sorters: Record<Sort, (a: Task, b: Task) => number> = {
+  due: byDue,
+  priority: (a, b) => priorityRank[b.priority] - priorityRank[a.priority] || byDue(a, b),
+  name: (a, b) => a.title.localeCompare(b.title),
+  created: (a, b) => b.created_at.localeCompare(a.created_at),
+  manual: (a, b) => a.order_in_group - b.order_in_group || a.created_at.localeCompare(b.created_at),
+}
+
 function ListView({ onOpen }: { onOpen: (id: string) => void }) {
-  const { today, statuses, statusById, setStatus, firstOpenStatus, addTask } = useTasks()
+  const { today, statuses, statusById, setStatus, firstOpenStatus, addTask, setOrder } = useTasks()
   const { workspace } = useWorkspace()
+  const toast = useToast()
   const visible = useVisibleTasks()
   const [tab, setTab] = useState<Tab>(() => readPref('odessi:tasks:tab', 'today'))
   const [group, setGroup] = useState<Group>(() => readPref('odessi:tasks:group', 'time'))
+  const [sort, setSort] = useState<Sort>(() => readPref('odessi:tasks:sort', 'due'))
   const [showDone, setShowDone] = useState(false)
   const [quick, setQuick] = useState('')
+  const [quickDate, setQuickDate] = useState<string | null | 'auto'>('auto')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [dragId, setDragId] = useState<string | null>(null)
+
+  useEffect(() => setQuickDate('auto'), [tab])
+  useEffect(() => {
+    if (!selected.size) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setSelected(new Set())
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selected.size])
   if (!workspace) return null
 
   const behavior = (t: Task) => statusById(t.status_id)?.behavior
@@ -115,7 +139,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     if (tab === 'today') return b === 'waiting' || (!!t.due_date && t.due_date <= today)
     return b !== 'waiting' && !!t.due_date && t.due_date > today
   })
-  const open = inTab.filter((t) => behavior(t) !== 'done').sort(byDue)
+  const open = inTab.filter((t) => behavior(t) !== 'done').sort(sorters[sort])
   const done = inTab.filter((t) => behavior(t) === 'done').sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? ''))
 
   const sections: { key: string; title: string; tasks: Task[] }[] = []
@@ -138,7 +162,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
   } else if (group === 'time') {
     push('past', 'Past due', open.filter((t) => t.due_date && t.due_date < today))
     const dated = open.filter((t) => t.due_date && t.due_date >= today)
-    for (const d of [...new Set(dated.map((t) => t.due_date!))]) push(d, formatDate(d, today), dated.filter((t) => t.due_date === d))
+    for (const d of [...new Set(dated.map((t) => t.due_date!))].sort()) push(d, formatDate(d, today), dated.filter((t) => t.due_date === d))
     push('none', 'No date', open.filter((t) => !t.due_date))
   } else {
     push('all', '', open)
@@ -154,12 +178,54 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     savePref('odessi:tasks:tab', t)
   }
 
+  const autoDate = tab === 'today' ? today : tab === 'upcoming' ? addDays(today, 1) : workspace.default_due === 'today' ? today : null
+  const chosenDate = quickDate === 'auto' ? autoDate : quickDate
+
   const submitQuick = async () => {
     const title = quick.trim()
     if (!title) return
     setQuick('')
-    await addTask({ title, due_date: tab === 'today' || workspace.default_due === 'today' ? today : null })
+    await addTask({ title, due_date: chosenDate })
+    if (tab !== 'all' && (!chosenDate || (tab === 'today' ? chosenDate > today : chosenDate <= today))) {
+      toast(chosenDate ? `Added for ${formatDate(chosenDate, today)}. You'll find it under ${tab === 'today' ? 'Upcoming' : 'Today'}.` : "Added with no date. You'll find it under All.")
+    }
+    setQuickDate('auto')
   }
+
+  // Dragging a row onto another row in the same group reorders that group and switches the sort to "My order".
+  const reorder = (list: Task[], targetId: string) => {
+    if (!dragId || dragId === targetId) return
+    const moved = list.find((t) => t.id === dragId)
+    if (!moved) return
+    const next = list.filter((t) => t.id !== dragId)
+    next.splice(next.findIndex((t) => t.id === targetId) + (list.indexOf(moved) < list.findIndex((t) => t.id === targetId) ? 1 : 0), 0, moved)
+    setOrder(next.map((t, i) => ({ id: t.id, order: (i + 1) * 1000 })))
+    setSort('manual')
+    savePref('odessi:tasks:sort', 'manual')
+  }
+
+  const select = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+
+  const rowProps = (t: Task, list: Task[]) => ({
+    task: t,
+    selected: selected.has(t.id),
+    anySelected: selected.size > 0,
+    dragging: dragId === t.id,
+    onSelect: select,
+    onOpen,
+    onToggle: toggle,
+    onDragStart: () => setDragId(t.id),
+    onDragEnd: () => setDragId(null),
+    onDropOn: () => {
+      reorder(list, t.id)
+      setDragId(null)
+    },
+  })
 
   return (
     <div className="flex flex-col gap-4">
@@ -176,7 +242,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
           </button>
         ))}
         <div className="flex-1" />
-        <span className="text-[13px] text-muted">Group:</span>
+        <span className="text-[13px] text-muted">Group by:</span>
         <Dropdown
           label="Group by"
           value={group}
@@ -190,17 +256,34 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             savePref('odessi:tasks:group', g)
           }}
         />
+        <span className="ml-2 text-[13px] text-muted">Sort by:</span>
+        <Dropdown
+          label="Sort by"
+          value={sort}
+          options={[
+            { value: 'due', label: 'Due date' },
+            { value: 'priority', label: 'Priority' },
+            { value: 'name', label: 'Name' },
+            { value: 'created', label: 'Newest first' },
+            { value: 'manual', label: 'My order' },
+          ]}
+          onChange={(v) => {
+            setSort(v)
+            savePref('odessi:tasks:sort', v)
+          }}
+        />
       </div>
 
-      <Card className="p-1.5">
+      <Card className="flex items-center gap-2 p-1.5">
         <input
           aria-label="Add a task"
-          placeholder={tab === 'today' ? 'Add a task for today…' : 'Add a task…'}
+          placeholder={chosenDate ? `Add a task for ${formatDate(chosenDate, today).toLowerCase()}…` : 'Add a task…'}
           value={quick}
           onChange={(e) => setQuick(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submitQuick()}
-          className="h-10 w-full rounded-xl bg-transparent px-3 text-sm placeholder:text-faint focus:bg-canvas/60 focus:outline-none"
+          className="h-10 min-w-0 flex-1 rounded-xl bg-transparent px-3 text-sm placeholder:text-faint focus:bg-canvas/60 focus:outline-none"
         />
+        <DatePicker label="Due date for the new task" value={chosenDate} today={today} weekStart={workspace.week_start} placeholder="No date" onChange={setQuickDate} />
       </Card>
 
       {sections.length === 0 && done.length === 0 ? (
@@ -218,7 +301,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             )}
             <Card>
               {s.tasks.map((t) => (
-                <TaskRow key={t.id} task={t} showStatus={group !== 'status'} onOpen={onOpen} onToggle={toggle} />
+                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} />
               ))}
             </Card>
           </div>
@@ -233,17 +316,155 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
           {showDone && (
             <Card>
               {done.map((t) => (
-                <TaskRow key={t.id} task={t} showStatus={false} onOpen={onOpen} onToggle={toggle} />
+                <TaskRow key={t.id} {...rowProps(t, done)} showStatus={false} />
               ))}
             </Card>
           )}
         </div>
       )}
+
+      {selected.size > 0 && <BulkBar ids={[...selected]} onClear={() => setSelected(new Set())} />}
     </div>
   )
 }
 
-function TaskRow({ task, showStatus, onOpen, onToggle }: { task: Task; showStatus: boolean; onOpen: (id: string) => void; onToggle: (t: Task) => void }) {
+/* Bulk bar: appears when you tick the boxes on rows. Change status, priority, or due date for all of them at once. */
+
+function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
+  const { statuses, tasks, setStatus, updateMany, deleteMany, today } = useTasks()
+  const { workspace } = useWorkspace()
+  const [confirming, setConfirming] = useState(false)
+  const chosen = tasks.filter((t) => ids.includes(t.id))
+  const barBtn = 'inline-flex h-9 items-center gap-1.5 rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] font-medium hover:bg-divider'
+
+  return (
+    <>
+      <div className="fixed bottom-20 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-border bg-surface p-2 pl-4 shadow-popup" role="toolbar" aria-label="Edit selected tasks">
+        <span className="pr-2 text-[13px] font-semibold">{ids.length} selected</span>
+        <Popover
+          side="top"
+          trigger={({ toggle }) => (
+            <button type="button" onClick={toggle} className={barBtn}>
+              Status ▾
+            </button>
+          )}
+        >
+          {(close) => (
+            <div className="w-44">
+              {statuses.map((s) => (
+                <MenuItem
+                  key={s.id}
+                  onClick={async () => {
+                    close()
+                    for (const t of chosen) await setStatus(t, s.id)
+                    onClear()
+                  }}
+                >
+                  <StatusPill status={s} />
+                </MenuItem>
+              ))}
+            </div>
+          )}
+        </Popover>
+        {workspace?.priorities_on && (
+          <Popover
+            side="top"
+            trigger={({ toggle }) => (
+              <button type="button" onClick={toggle} className={barBtn}>
+                Priority ▾
+              </button>
+            )}
+          >
+            {(close) => (
+              <div className="w-40">
+                {(['urgent', 'high', 'medium', 'low', 'none'] as Priority[]).map((p) => (
+                  <MenuItem
+                    key={p}
+                    onClick={() => {
+                      close()
+                      updateMany(ids, { priority: p })
+                      onClear()
+                    }}
+                  >
+                    {p === 'none' ? 'No priority' : priorityStyles[p].label}
+                  </MenuItem>
+                ))}
+              </div>
+            )}
+          </Popover>
+        )}
+        <DatePicker
+          label="Due date for selected tasks"
+          value={null}
+          today={today}
+          weekStart={workspace?.week_start}
+          placeholder="Due date"
+          onChange={(d) => {
+            updateMany(ids, { due_date: d, repeat_anchor: null, ...(d ? {} : { due_time: null }) })
+            onClear()
+          }}
+        />
+        <button type="button" onClick={() => setConfirming(true)} className={`${barBtn} text-[#B3261E]`}>
+          Delete
+        </button>
+        <button type="button" aria-label="Clear selection" title="Clear selection (Esc)" onClick={onClear} className="size-9 rounded-lg text-muted hover:bg-divider hover:text-ink">
+          ✕
+        </button>
+      </div>
+      <Modal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title={`Delete ${ids.length} ${ids.length === 1 ? 'task' : 'tasks'}?`}
+        footer={
+          <>
+            <span className="text-xs text-faint">This can’t be undone</span>
+            <div className="flex gap-2">
+              <Button onClick={() => setConfirming(false)}>Keep them</Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setConfirming(false)
+                  deleteMany(ids)
+                  onClear()
+                }}
+              >
+                Delete
+              </Button>
+            </div>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">They will be gone for good, subtasks included. If you only want them out of the way, set them to Canceled instead.</p>
+      </Modal>
+    </>
+  )
+}
+
+function TaskRow({
+  task,
+  showStatus,
+  selected,
+  anySelected,
+  dragging,
+  onSelect,
+  onOpen,
+  onToggle,
+  onDragStart,
+  onDragEnd,
+  onDropOn,
+}: {
+  task: Task
+  showStatus: boolean
+  selected: boolean
+  anySelected: boolean
+  dragging: boolean
+  onSelect: (id: string) => void
+  onOpen: (id: string) => void
+  onToggle: (t: Task) => void
+  onDragStart: () => void
+  onDragEnd: () => void
+  onDropOn: () => void
+}) {
   const { statusById, tasks, today } = useTasks()
   const { workspace } = useWorkspace()
   const status = statusById(task.status_id)
@@ -251,40 +472,62 @@ function TaskRow({ task, showStatus, onOpen, onToggle }: { task: Task; showStatu
   const done = status.behavior === 'done'
   const subs = tasks.filter((t) => t.parent_task_id === task.id)
   const subsDone = subs.filter((s) => statusById(s.status_id)?.behavior === 'done').length
-  const context: string[] = []
-  if (subs.length) context.push(`${subsDone} of ${subs.length} subtasks`)
+  const since = task.waiting_since ? (diffDays(today, task.waiting_since) < 7 ? weekdayNames[weekdayOf(task.waiting_since)].slice(0, 3) : formatDate(task.waiting_since, today)) : 'today'
+  const waitingLine = status.behavior === 'waiting' ? `Waiting${task.waiting_on_text ? ` on ${task.waiting_on_text}` : ''} since ${since}` : null
 
   return (
     <div
       role="button"
       tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', task.id)
+        onDragStart()
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault()
+        onDropOn()
+      }}
       onClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className="flex min-h-[52px] cursor-pointer items-center gap-3 border-divider px-[18px] py-2 hover:bg-[#FAFAFB] focus-visible:bg-[#FAFAFB] focus-visible:outline-none [&+&]:border-t"
+      className={`group flex min-h-[52px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-3 hover:bg-[#FAFAFB] focus-visible:bg-[#FAFAFB] focus-visible:outline-none [&+&]:border-t ${selected ? 'bg-accent-tint hover:bg-accent-tint' : ''} ${dragging ? 'opacity-40' : ''}`}
     >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={selected}
+        aria-label={`Select ${task.title}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          onSelect(task.id)
+        }}
+        className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border-[1.5px] text-[10px] leading-none text-white ${selected ? 'border-ink bg-ink' : 'border-[#C4C4CA] bg-surface'} ${selected || anySelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+      >
+        {selected && '✓'}
+      </button>
       <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={() => onToggle(task)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
-        {(context.length > 0 || task.repeat_rule) && (
-          <span className="flex items-center gap-2 truncate text-xs text-faint">
+        {(waitingLine || subs.length > 0 || task.repeat_rule) && (
+          <span className="flex items-center gap-2 text-xs text-faint">
+            {waitingLine && (
+              <span className="truncate text-waiting" title={waitingLine}>
+                {waitingLine}
+              </span>
+            )}
             {task.repeat_rule && (
-              <span className="inline-flex items-center gap-1">
+              <span className="inline-flex shrink-0 items-center gap-1">
                 <RepeatIcon size={11} />
                 {describeRepeat(task.repeat_rule, task.due_date ?? today)}
               </span>
             )}
-            {context.join(' · ')}
+            {subs.length > 0 && <span className="shrink-0">{subsDone} of {subs.length} subtasks</span>}
           </span>
         )}
       </div>
-      {status.behavior === 'waiting' ? (
-        <span className="text-[13px] whitespace-nowrap text-waiting">
-          {task.waiting_on_text ? `${task.waiting_on_text} · ` : ''}Waiting since{' '}
-          {task.waiting_since ? (diffDays(today, task.waiting_since) < 7 ? weekdayNames[weekdayOf(task.waiting_since)].slice(0, 3) : formatDate(task.waiting_since, today)) : 'today'}
-        </span>
-      ) : (
-        <DueText task={task} today={today} done={done} />
-      )}
+      <DueText task={task} today={today} done={done} />
       {workspace?.priorities_on && <PriorityPill priority={task.priority} />}
       {showStatus && (
         <span className="flex w-24 justify-end">
@@ -301,6 +544,7 @@ function TaskRow({ task, showStatus, onOpen, onToggle }: { task: Task; showStatu
 function BoardCard({ t, onOpen }: { t: Task; onOpen: (id: string) => void }) {
   const { statusById, today } = useTasks()
   const { workspace } = useWorkspace()
+  const status = statusById(t.status_id)
   return (
     <div
       draggable
@@ -309,11 +553,11 @@ function BoardCard({ t, onOpen }: { t: Task; onOpen: (id: string) => void }) {
       onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)}
       onClick={() => onOpen(t.id)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(t.id)}
-      className="flex cursor-grab flex-col gap-2 rounded-xl border border-border bg-surface p-3 shadow-card hover:border-[#DCDCE0] active:cursor-grabbing"
+      className="flex cursor-grab flex-col gap-2 rounded-xl border border-border bg-surface p-3 shadow-card transition-shadow hover:border-[#DCDCE0] hover:shadow-[0_4px_14px_rgba(20,20,30,0.1)] active:cursor-grabbing"
     >
       <span className="text-sm font-medium">{t.title}</span>
       <div className="flex flex-wrap items-center gap-2">
-        <DueText task={t} today={today} done={statusById(t.status_id)?.behavior === 'done'} />
+        <DueText task={t} today={today} done={status?.behavior === 'done'} />
         {t.repeat_rule && (
           <span className="text-faint" title="Repeats">
             <RepeatIcon />
@@ -326,89 +570,134 @@ function BoardCard({ t, onOpen }: { t: Task; onOpen: (id: string) => void }) {
   )
 }
 
+type Column = { key: string; head: ReactNode; tasks: Task[]; drop?: (t: Task) => void; add?: Partial<Task>; stage?: boolean }
+
 function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (changes: Partial<Task>) => void }) {
-  const { statuses, setStatus } = useTasks()
+  const { statuses, statusById, setStatus, updateTask, today } = useTasks()
+  const toast = useToast()
   const visible = useVisibleTasks()
   const [editing, setEditing] = useState(false)
   const [doneOpen, setDoneOpen] = useState(false)
   const [overId, setOverId] = useState<string | null>(null)
-  const columns = statuses.filter((s) => s.behavior === 'open' || s.behavior === 'waiting')
+  const [by, setBy] = useState<BoardGroup>(() => readPref('odessi:tasks:boardGroup', 'status'))
   const doneStatus = statuses.find((s) => s.behavior === 'done')
+  const notDone = visible.filter((t) => statusById(t.status_id)?.behavior !== 'done')
+  const tomorrow = addDays(today, 1)
 
-  const drop = (e: DragEvent, status: Status) => {
+  let columns: Column[]
+  if (by === 'priority') {
+    columns = (['urgent', 'high', 'medium', 'low', 'none'] as Priority[]).map((p) => ({
+      key: p,
+      head: <span className="text-[13px] font-semibold">{p === 'none' ? 'No priority' : priorityStyles[p].label}</span>,
+      tasks: notDone.filter((t) => t.priority === p).sort(byDue),
+      drop: (t) => updateTask(t.id, { priority: p }),
+      add: { priority: p },
+    }))
+  } else if (by === 'due') {
+    const pick = (f: (t: Task) => boolean) => notDone.filter(f).sort(byDue)
+    columns = [
+      { key: 'past', head: <span className="text-[13px] font-semibold">Past due</span>, tasks: pick((t) => !!t.due_date && t.due_date < today) },
+      { key: 'today', head: <span className="text-[13px] font-semibold">Today</span>, tasks: pick((t) => t.due_date === today), drop: (t) => updateTask(t.id, { due_date: today, repeat_anchor: null }), add: { due_date: today } },
+      { key: 'tomorrow', head: <span className="text-[13px] font-semibold">Tomorrow</span>, tasks: pick((t) => t.due_date === tomorrow), drop: (t) => updateTask(t.id, { due_date: tomorrow, repeat_anchor: null }), add: { due_date: tomorrow } },
+      { key: 'later', head: <span className="text-[13px] font-semibold">Later</span>, tasks: pick((t) => !!t.due_date && t.due_date > tomorrow) },
+      { key: 'none', head: <span className="text-[13px] font-semibold">No date</span>, tasks: pick((t) => !t.due_date), drop: (t) => updateTask(t.id, { due_date: null, due_time: null, repeat_anchor: null }) },
+    ]
+  } else {
+    columns = statuses
+      .filter((s) => s.behavior === 'open' || s.behavior === 'waiting')
+      .map((s) => ({ key: s.id, head: <StatusPill status={s} />, tasks: visible.filter((t) => t.status_id === s.id).sort(byDue), drop: (t) => setStatus(t, s.id), add: { status_id: s.id }, stage: true }))
+  }
+
+  const drop = (e: DragEvent, col: { key: string; drop?: (t: Task) => void }) => {
     e.preventDefault()
     setOverId(null)
     const task = visible.find((t) => t.id === e.dataTransfer.getData('text/plain'))
-    if (task && task.status_id !== status.id) setStatus(task, status.id)
+    if (!task) return
+    if (col.drop) col.drop(task)
+    else toast('You can drop onto Today, Tomorrow, or No date. Open the task to pick another day.')
   }
   const over = (e: DragEvent, id: string) => {
     e.preventDefault()
     setOverId(id)
   }
+  const doneTasks = doneStatus ? visible.filter((t) => t.status_id === doneStatus.id) : []
 
   return (
-    <div className="flex items-start gap-4 overflow-x-auto pb-2">
-      {columns.map((s) => {
-        const items = visible.filter((t) => t.status_id === s.id).sort(byDue)
-        return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-end gap-1">
+        <span className="text-[13px] text-muted">Group by:</span>
+        <Dropdown
+          label="Group by"
+          value={by}
+          options={[
+            { value: 'status', label: 'Status' },
+            { value: 'priority', label: 'Priority' },
+            { value: 'due', label: 'Due date' },
+          ]}
+          onChange={(v) => {
+            setBy(v)
+            savePref('odessi:tasks:boardGroup', v)
+          }}
+        />
+      </div>
+      <div className="flex items-start gap-4 overflow-x-auto pb-2">
+        {columns.map((c) => (
           <div
-            key={s.id}
-            onDragOver={(e) => over(e, s.id)}
+            key={c.key}
+            onDragOver={(e) => over(e, c.key)}
             onDragLeave={() => setOverId(null)}
-            onDrop={(e) => drop(e, s)}
-            className={`flex w-[300px] shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${overId === s.id ? 'bg-[#EDEDF0]' : ''}`}
+            onDrop={(e) => drop(e, c)}
+            className={`flex w-[300px] shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${overId === c.key ? 'bg-[#EDEDF0]' : ''}`}
           >
             <div className="flex items-center gap-2 px-1">
-              <StatusPill status={s} />
-              <span className="text-[13px] text-faint">{items.length}</span>
+              {c.head}
+              <span className="text-[13px] text-faint">{c.tasks.length}</span>
               <div className="flex-1" />
-              <MoreMenu>
-                {(close) => (
-                  <MenuItem
-                    onClick={() => {
-                      close()
-                      setEditing(true)
-                    }}
-                  >
-                    Edit stages…
-                  </MenuItem>
-                )}
-              </MoreMenu>
+              {c.stage && (
+                <MoreMenu>
+                  {(close) => (
+                    <MenuItem
+                      onClick={() => {
+                        close()
+                        setEditing(true)
+                      }}
+                    >
+                      Edit stages…
+                    </MenuItem>
+                  )}
+                </MoreMenu>
+              )}
             </div>
-            {items.map((t) => (
+            {c.tasks.map((t) => (
               <BoardCard key={t.id} t={t} onOpen={onOpen} />
             ))}
-            <button
-              type="button"
-              onClick={() => onNew({ status_id: s.id })}
-              className="h-9 rounded-xl border border-dashed border-border text-[13px] text-muted hover:border-solid hover:bg-surface"
-            >
+            <button type="button" onClick={() => onNew(c.add ?? {})} className="h-9 rounded-xl border-[1.5px] border-dashed border-field text-[13px] text-muted hover:border-solid hover:bg-surface">
               + Add task
             </button>
           </div>
-        )
-      })}
+        ))}
 
-      {doneStatus && (
-        <div
-          onDragOver={(e) => over(e, doneStatus.id)}
-          onDragLeave={() => setOverId(null)}
-          onDrop={(e) => drop(e, doneStatus)}
-          className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${doneOpen ? 'w-[300px]' : 'w-12 items-center'} ${overId === doneStatus.id ? 'bg-[#EDEDF0]' : ''}`}
-        >
-          <button type="button" onClick={() => setDoneOpen(!doneOpen)} className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink" aria-expanded={doneOpen}>
-            {doneOpen ? (
-              <>
-                <StatusPill status={doneStatus} /> {visible.filter((t) => t.status_id === doneStatus.id).length}
-              </>
-            ) : (
-              <span className="[writing-mode:vertical-rl]">Done · {visible.filter((t) => t.status_id === doneStatus.id).length}</span>
-            )}
-          </button>
-          {doneOpen && visible.filter((t) => t.status_id === doneStatus.id).map((t) => <BoardCard key={t.id} t={t} onOpen={onOpen} />)}
-        </div>
-      )}
-      <StatusEditor open={editing} onClose={() => setEditing(false)} />
+        {by === 'status' && doneStatus && (
+          <div
+            onDragOver={(e) => over(e, doneStatus.id)}
+            onDragLeave={() => setOverId(null)}
+            onDrop={(e) => drop(e, { key: doneStatus.id, drop: (t) => setStatus(t, doneStatus.id) })}
+            className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${doneOpen ? 'w-[300px]' : 'w-12 items-center'} ${overId === doneStatus.id ? 'bg-[#EDEDF0]' : ''}`}
+          >
+            <button type="button" onClick={() => setDoneOpen(!doneOpen)} className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink" aria-expanded={doneOpen}>
+              {doneOpen ? (
+                <>
+                  <StatusPill status={doneStatus} /> {doneTasks.length}
+                </>
+              ) : (
+                <span className="[writing-mode:vertical-rl]">Done · {doneTasks.length}</span>
+              )}
+            </button>
+            {doneOpen && doneTasks.map((t) => <BoardCard key={t.id} t={t} onOpen={onOpen} />)}
+          </div>
+        )}
+        <StatusEditor open={editing} onClose={() => setEditing(false)} />
+      </div>
     </div>
   )
 }

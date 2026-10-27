@@ -1,10 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Button, Modal, useToast } from '../components/ui'
-import { formatDate, isWeekend, moveOffWeekend, nextRepeatDate, todayISO, type RepeatRule } from './dates'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Button, Modal, Switch, useToast } from '../components/ui'
+import { formatDate, isWeekend, moveOffWeekend, nextRepeatDate, todayISO, type RepeatRule, type WeekendChoice } from './dates'
 import { supabase } from './supabase'
 import { useWorkspace } from './workspace'
 
-export type Priority = 'high' | 'medium' | 'low' | 'none'
+export type Priority = 'urgent' | 'high' | 'medium' | 'low' | 'none'
 
 export type Status = {
   id: string
@@ -29,6 +29,8 @@ export type Task = {
   parent_task_id: string | null
   repeat_rule: RepeatRule | null
   repeat_from: 'due' | 'done' | null
+  // The date this repeat was meant for, before any weekend move. Next dates count from it so the schedule never drifts.
+  repeat_anchor: string | null
   waiting_on_text: string
   waiting_since: string | null
   waiting_check_in: string | null
@@ -39,10 +41,13 @@ export type Task = {
 
 // Priority pills are a fixed set with fixed colors from the design system.
 export const priorityStyles: Record<Exclude<Priority, 'none'>, { label: string; bg: string; text: string }> = {
+  urgent: { label: 'Urgent', bg: '#EFA39B', text: '#6B1A12' },
   high: { label: 'High', bg: '#F4B88A', text: '#6E3410' },
   medium: { label: 'Medium', bg: '#F3DA72', text: '#5A4706' },
   low: { label: 'Low', bg: '#C3D4E1', text: '#2D3D4B' },
 }
+
+export const priorityRank: Record<Priority, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 }
 
 // Soft color pairs offered when you edit a status on the page.
 export const statusColors = [
@@ -66,6 +71,9 @@ type TasksState = {
   firstOpenStatus: Status | undefined
   addTask: (changes?: Partial<Task>) => Promise<Task | null>
   updateTask: (id: string, changes: Partial<Task>) => Promise<void>
+  updateMany: (ids: string[], changes: Partial<Task>) => Promise<void>
+  deleteMany: (ids: string[]) => Promise<void>
+  setOrder: (order: { id: string; order: number }[]) => Promise<void>
   setStatus: (task: Task, statusId: string) => Promise<void>
   deleteTask: (id: string) => Promise<void>
   duplicateTask: (task: Task) => Promise<Task | null>
@@ -85,7 +93,8 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const [statuses, setStatuses] = useState<Status[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
-  const [pending, setPending] = useState<{ task: Task; date: string; holder: { id?: string } } | null>(null)
+  const [pending, setPending] = useState<{ task: Task; date: string; nominal: string; holder: { id?: string } } | null>(null)
+  const [remember, setRemember] = useState(false)
   const workspaceId = workspace?.id
   const today = todayISO(workspace?.time_zone ?? 'UTC')
 
@@ -146,11 +155,31 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     await supabase.from('tasks').delete().eq('id', id)
   }, [])
 
+  const updateMany = useCallback(
+    async (ids: string[], changes: Partial<Task>) => {
+      setTasks((list) => list.map((t) => (ids.includes(t.id) ? { ...t, ...changes } : t)))
+      const { error } = await supabase.from('tasks').update(changes).in('id', ids)
+      if (error) toast("Couldn't save those changes.")
+    },
+    [toast],
+  )
+
+  const deleteMany = useCallback(async (ids: string[]) => {
+    setTasks((list) => list.filter((t) => !ids.includes(t.id) && !ids.includes(t.parent_task_id ?? '')))
+    await supabase.from('tasks').delete().in('id', ids)
+  }, [])
+
+  const setOrder = useCallback(async (order: { id: string; order: number }[]) => {
+    setTasks((list) => list.map((t) => ({ ...t, order_in_group: order.find((o) => o.id === t.id)?.order ?? t.order_in_group })))
+    await Promise.all(order.map((o) => supabase.from('tasks').update({ order_in_group: o.order }).eq('id', o.id)))
+  }, [])
+
   // Makes the next copy of a repeating task, subtasks included.
   const createNext = useCallback(
-    async (task: Task, date: string) => {
-      const base: Partial<Task> = { due_date: date }
+    async (task: Task, date: string, nominal: string, weekend?: WeekendChoice) => {
+      const base: Partial<Task> = { due_date: date, repeat_anchor: nominal }
       for (const k of NEXT_FIELDS) (base as Record<string, unknown>)[k] = task[k]
+      if (weekend && task.repeat_rule) base.repeat_rule = { ...task.repeat_rule, weekend }
       const next = await addTask(base)
       if (!next) return undefined
       const subs = tasks.filter((t) => t.parent_task_id === task.id)
@@ -160,6 +189,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [addTask, tasks],
   )
 
+  const setStatusRef = useRef<((task: Task, statusId: string) => Promise<void>) | null>(null)
   const setStatus = useCallback(
     async (task: Task, statusId: string) => {
       const next = statusById(statusId)
@@ -181,15 +211,19 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       const rule = task.repeat_rule
       const holder: { id?: string } = {}
       if (justFinished && rule && !task.parent_task_id) {
-        const from = (task.repeat_from ?? workspace?.repeat_from ?? 'due') === 'done' ? today : (task.due_date ?? today)
-        let date = nextRepeatDate(rule, from)
-        for (let i = 0; i < 400 && date <= today; i++) date = nextRepeatDate(rule, date)
-        const rulePick = workspace?.weekend_rule ?? 'ask'
-        if (isWeekend(date) && rulePick === 'ask') {
-          setPending({ task, date, holder })
+        const countFrom = task.repeat_from ?? workspace?.repeat_from ?? 'due'
+        const base = countFrom === 'done' ? today : (task.repeat_anchor ?? task.due_date ?? today)
+        let nominal = nextRepeatDate(rule, base)
+        for (let i = 0; i < 400 && nominal <= today; i++) nominal = nextRepeatDate(rule, nominal)
+        // Only ask when a weekend is a surprise: not when the task itself already sits on a weekend.
+        const startedOnWeekend = !!task.due_date && isWeekend(task.due_date)
+        const choice: WeekendChoice | 'ask' = rule.weekend ?? (startedOnWeekend ? 'keep' : (workspace?.weekend_rule ?? 'ask'))
+        if (isWeekend(nominal) && choice === 'ask') {
+          setRemember(false)
+          setPending({ task, date: nominal, nominal, holder })
         } else {
-          if (isWeekend(date)) date = moveOffWeekend(date, rulePick as 'friday' | 'monday')
-          holder.id = await createNext(task, date)
+          const date = isWeekend(nominal) && choice !== 'keep' ? moveOffWeekend(nominal, choice as 'friday' | 'monday') : nominal
+          holder.id = await createNext(task, date, nominal)
         }
       }
 
@@ -201,9 +235,18 @@ export function TasksProvider({ children }: { children: ReactNode }) {
           if (holder.id) await deleteTask(holder.id)
         })
       }
+
+      // Finishing the last open subtask finishes the parent, if that setting is on.
+      if (next.behavior === 'done' && task.parent_task_id && workspace?.auto_complete_parent) {
+        const parent = tasks.find((t) => t.id === task.parent_task_id)
+        const siblings = tasks.filter((t) => t.parent_task_id === task.parent_task_id)
+        const allDone = siblings.every((s) => s.id === task.id || statusById(s.status_id)?.behavior === 'done')
+        if (parent && allDone && statusById(parent.status_id)?.behavior !== 'done') await setStatusRef.current?.(parent, statusId)
+      }
     },
-    [statusById, updateTask, today, workspace, createNext, deleteTask, toast],
+    [statusById, updateTask, today, workspace, createNext, deleteTask, toast, tasks],
   )
+  setStatusRef.current = setStatus
 
   const duplicateTask = useCallback(
     async (task: Task) => {
@@ -269,11 +312,12 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [tasks],
   )
 
-  const choose = async (pick: 'keep' | 'friday' | 'monday') => {
+  const choose = async (pick: WeekendChoice) => {
     if (!pending) return
-    const { task, date, holder } = pending
+    const { task, nominal, holder } = pending
     setPending(null)
-    holder.id = await createNext(task, pick === 'keep' ? date : moveOffWeekend(date, pick))
+    const date = pick === 'keep' ? nominal : moveOffWeekend(nominal, pick)
+    holder.id = await createNext(task, date, nominal, remember ? pick : undefined)
   }
 
   return (
@@ -287,6 +331,9 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         firstOpenStatus,
         addTask,
         updateTask,
+        updateMany,
+        deleteMany,
+        setOrder,
         setStatus,
         deleteTask,
         duplicateTask,
@@ -315,9 +362,17 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         }
       >
         {pending && (
-          <p className="text-sm leading-relaxed text-muted">
-            The next “{pending.task.title}” is due {formatDate(pending.date, today)}, which is a weekend. Where should it go?
-          </p>
+          <div className="flex flex-col gap-4">
+            <p className="text-sm leading-relaxed text-muted">
+              The next “{pending.task.title}” is due {formatDate(pending.date, today)}, which is a weekend. Where should it go?
+            </p>
+            <label className="flex items-center gap-3 rounded-xl bg-canvas px-3.5 py-3 text-[13px]">
+              <Switch label="Do this every time" checked={remember} onChange={setRemember} />
+              <span>
+                <span className="font-semibold">Do this every time.</span> <span className="text-muted">Off means just this one. The rest of the schedule keeps its original days, so nothing drifts.</span>
+              </span>
+            </label>
+          </div>
         )}
       </Modal>
     </TasksContext.Provider>

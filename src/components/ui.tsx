@@ -214,7 +214,7 @@ export function Dropdown<T extends string>({
           aria-label={label}
           aria-expanded={open}
           onClick={toggle}
-          className="h-[34px] rounded-lg border border-border bg-surface px-3 text-[13px] font-semibold text-ink hover:bg-divider focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          className="h-[34px] rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] font-semibold text-ink hover:bg-divider focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
         >
           {current?.label ?? 'Choose'} ▾
         </button>
@@ -274,6 +274,7 @@ export function Modal({
   children,
   footer,
   wide,
+  headerActions,
 }: {
   open: boolean
   onClose: () => void
@@ -281,6 +282,7 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
+  headerActions?: ReactNode
 }) {
   useEffect(() => {
     if (!open) return
@@ -301,9 +303,12 @@ export function Modal({
       >
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-base font-semibold">{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-divider hover:text-ink">
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            {headerActions}
+            <button type="button" aria-label="Close" onClick={onClose} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-divider hover:text-ink">
+              ✕
+            </button>
+          </div>
         </div>
         <div className="overflow-y-auto px-6 pb-5">{children}</div>
         <div className="flex items-center justify-between gap-3 border-t border-divider px-6 py-3">

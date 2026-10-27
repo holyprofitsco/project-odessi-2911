@@ -30,9 +30,9 @@ export function sortAreas(order: string[]) {
   return [...areas].sort((a, b) => rank(a) - rank(b))
 }
 
-// Press and hold anywhere on an area, then drag it up or down. A quick click still opens it.
+// Grab an area and drag it up or down: it lifts as soon as you move (touch screens need a short hold). A quick click still opens it.
 // The list moves live while dragging and saves on drop. The sidebar and Settings read the same saved order, so they stay in sync.
-const HOLD_MS = 250
+const HOLD_MS = 250 // touch only
 
 export function useAreaOrder() {
   const { workspace, updateWorkspace } = useWorkspace()
@@ -53,6 +53,7 @@ export function useAreaOrder() {
     let order = saved
     setDragging(key)
     setDraft(order)
+    document.body.style.cursor = 'grabbing'
 
     const onMove = (e: globalThis.PointerEvent) => {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-area]')?.getAttribute('data-area')
@@ -64,6 +65,7 @@ export function useAreaOrder() {
       setDraft(order)
     }
     const onUp = () => {
+      document.body.style.cursor = ''
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -85,11 +87,19 @@ export function useAreaOrder() {
       if (e.pointerType === 'mouse') e.preventDefault()
       justDropped.current = false
       cancelHold()
-      hold.current = { x: e.clientX, y: e.clientY, timer: window.setTimeout(() => (hold.current = null, startDrag(key)), HOLD_MS) }
+      hold.current = {
+        x: e.clientX,
+        y: e.clientY,
+        timer: window.setTimeout(() => (hold.current = null, startDrag(key)), e.pointerType === 'mouse' ? 60_000 : HOLD_MS),
+      }
     },
     onPointerMove: (e: PointerEvent<HTMLElement>) => {
       // Moving before the hold finishes is a normal click or scroll, not a drag.
-      if (hold.current && Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 6) cancelHold()
+      if (!hold.current || Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) <= 4) return
+      // A mouse picks the area up the moment it moves. A finger moving first means scrolling.
+      const grab = e.pointerType === 'mouse'
+      cancelHold()
+      if (grab) startDrag(key)
     },
     onPointerUp: cancelHold,
     onPointerLeave: cancelHold,

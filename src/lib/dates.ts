@@ -1,8 +1,12 @@
 // Plain date helpers. Dates travel as 'YYYY-MM-DD' strings and times as 'HH:MM' or 'HH:MM:SS', so there are no time zone surprises.
 
-export type RepeatRule =
+export type WeekendChoice = 'keep' | 'friday' | 'monday'
+
+// `weekend` is what to do every time a repeat lands on a Saturday or Sunday. Left out, the workspace setting decides.
+export type RepeatRule = (
   | { kind: 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'yearly' }
   | { kind: 'custom'; every: number; unit: 'days' | 'weeks' | 'months' | 'years'; nth?: number; weekday?: number }
+) & { weekend?: WeekendChoice }
 
 const DAY_MS = 86_400_000
 const toUTC = (iso: string) => {
@@ -52,7 +56,7 @@ function nthWeekdayOfMonth(iso: string, nth: number, weekday: number) {
   return toISO(new Date(Date.UTC(y, m, 1 + offset + (nth - 1) * 7)))
 }
 
-export function nextRepeatDate(rule: RepeatRule, from: string) {
+export function nextRepeatDate(rule: RepeatRule, from: string): string {
   switch (rule.kind) {
     case 'daily':
       return addDays(from, 1)

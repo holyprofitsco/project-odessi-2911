@@ -33,6 +33,7 @@ export default function TasksSettings() {
         <CardHeader title="Priority" />
         <CardRow className="py-3">
           <div className="flex flex-1 items-center gap-2">
+            <PriorityPill priority="urgent" />
             <PriorityPill priority="high" />
             <PriorityPill priority="medium" />
             <PriorityPill priority="low" />
@@ -62,6 +63,17 @@ export default function TasksSettings() {
           />
         </Row>
         <div className="h-1.5" />
+      </Card>
+
+      <Card>
+        <CardHeader title="Subtasks" />
+        <CardRow className="py-3">
+          <div className="flex flex-1 flex-col gap-0.5">
+            <span className="text-sm font-medium">Auto-complete tasks when all subtasks are completed</span>
+            <span className="text-[13px] text-muted">Checking off the last subtask marks the main task done too.</span>
+          </div>
+          <Switch label="Auto-complete tasks when all subtasks are completed" checked={workspace.auto_complete_parent} onChange={(auto_complete_parent) => updateWorkspace({ auto_complete_parent })} />
+        </CardRow>
       </Card>
 
       <Card>

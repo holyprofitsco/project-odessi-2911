@@ -52,7 +52,7 @@ export default function General() {
           description="Turn off what you don't use, and press and hold to drag them into a new order. Nothing gets deleted: turn an area back on and everything is right where you left it."
         />
         {list.map((a) => (
-          <CardRow key={a.key} {...dragProps(a.key)} className={['group relative select-none', dragging === a.key ? 'z-10 cursor-grabbing bg-surface shadow-[0_4px_14px_rgba(20,20,30,0.12)]' : ''].join(' ')}>
+          <CardRow key={a.key} {...dragProps(a.key)} className={['group relative select-none transition-[transform,box-shadow] duration-150 ease-out', dragging === a.key ? 'z-10 scale-[1.01] cursor-grabbing bg-surface shadow-[0_8px_22px_rgba(20,20,30,0.18)]' : ''].join(' ')}>
             <span className="absolute top-1/2 left-1 -translate-y-1/2 cursor-grab text-faint opacity-0 group-hover:opacity-100">
               <GripIcon />
             </span>
@@ -124,12 +124,13 @@ export default function General() {
             onChange={(week_start) => updateWorkspace({ week_start })}
           />
         </Row>
-        <Row label="When a date lands on a weekend">
+        <Row label="When a repeating task lands on a weekend">
           <Dropdown
-            label="When a date lands on a weekend"
+            label="When a repeating task lands on a weekend"
             value={workspace.weekend_rule}
             options={[
               { value: 'ask', label: 'Ask me' },
+              { value: 'keep', label: 'Keep it' },
               { value: 'friday', label: 'Move to Friday' },
               { value: 'monday', label: 'Move to Monday' },
             ]}

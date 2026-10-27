@@ -8,6 +8,7 @@ type Props = {
   today: string
   from: 'due' | 'done' | null
   defaultFrom: 'due' | 'done'
+  defaultWeekend: string
   onChange: (rule: RepeatRule | null) => void
   onFromChange: (from: 'due' | 'done' | null) => void
 }
@@ -15,7 +16,7 @@ type Props = {
 const units = ['days', 'weeks', 'months', 'years'] as const
 
 // "Repeat" row for the task pop-up: quick picks first, then a sentence builder for anything else.
-export default function RepeatPicker({ rule, due, today, from, defaultFrom, onChange, onFromChange }: Props) {
+export default function RepeatPicker({ rule, due, today, from, defaultFrom, defaultWeekend, onChange, onFromChange }: Props) {
   const [open, setOpen] = useState(false)
   const [custom, setCustom] = useState(rule?.kind === 'custom')
   const base = due ?? today
@@ -32,7 +33,7 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, onCh
 
   const c = rule?.kind === 'custom' ? rule : null
   const setCustomRule = (changes: Partial<Extract<RepeatRule, { kind: 'custom' }>>) =>
-    onChange({ kind: 'custom', every: c?.every ?? 1, unit: c?.unit ?? 'weeks', nth: c?.nth, weekday: c?.weekday, ...changes })
+    onChange({ kind: 'custom', every: c?.every ?? 1, unit: c?.unit ?? 'weeks', nth: c?.nth, weekday: c?.weekday, weekend: c?.weekend, ...changes })
 
   return (
     <div className="flex flex-col gap-2">
@@ -40,13 +41,13 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, onCh
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex h-9 w-fit items-center gap-2 rounded-lg border border-border bg-surface px-3 text-[13px] hover:bg-divider"
+        className="flex h-9 w-fit items-center gap-2 rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] hover:bg-divider"
       >
         {rule ? describeRepeat(rule, due ?? today) : 'Does not repeat'} <span className="text-xs text-faint">▾</span>
       </button>
 
       {open && (
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-[#FBFBFC] p-3">
+        <div className="flex flex-col gap-3 rounded-xl border-[1.5px] border-border bg-[#FBFBFC] p-3">
           <div className="flex flex-wrap gap-1.5">
             {quick.map((q) => {
               const active = !custom && (q.rule === null ? rule === null : rule?.kind === q.rule.kind)
@@ -56,7 +57,7 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, onCh
                   type="button"
                   onClick={() => {
                     setCustom(false)
-                    onChange(q.rule)
+                    onChange(q.rule && rule?.weekend ? { ...q.rule, weekend: rule.weekend } : q.rule)
                   }}
                   className={`h-8 rounded-full border px-3 text-[13px] ${active ? 'border-ink bg-ink text-white' : 'border-border bg-surface hover:bg-divider'}`}
                 >
@@ -68,7 +69,7 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, onCh
               type="button"
               onClick={() => {
                 setCustom(true)
-                if (!c) onChange({ kind: 'custom', every: 1, unit: 'weeks' })
+                if (!c) onChange({ kind: 'custom', every: 1, unit: 'weeks', weekend: rule?.weekend })
               }}
               className={`h-8 rounded-full border px-3 text-[13px] ${custom ? 'border-ink bg-ink text-white' : 'border-border bg-surface hover:bg-divider'}`}
             >
@@ -86,7 +87,7 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, onCh
                 max={99}
                 value={c.every}
                 onChange={(e) => setCustomRule({ every: Math.max(1, Number(e.target.value) || 1) })}
-                className="h-[34px] w-16 rounded-lg border border-border bg-surface px-2 text-center"
+                className="h-[34px] w-16 rounded-lg border-[1.5px] border-field bg-surface px-2 text-center"
               />
               <Dropdown
                 label="Unit"
@@ -135,18 +136,36 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, onCh
           )}
 
           {rule && (
-            <div className="flex items-center gap-2 border-t border-divider pt-3 text-[13px]">
-              <span className="text-muted">More:</span>
-              <Dropdown
-                label="Count the next one from"
-                value={from ?? 'default'}
-                options={[
-                  { value: 'default', label: `Use my setting (${defaultFrom === 'due' ? 'the due date' : 'when I finish it'})` },
-                  { value: 'due', label: 'Count from the due date' },
-                  { value: 'done', label: 'Count from when I finish it' },
-                ]}
-                onChange={(v) => onFromChange(v === 'default' ? null : v)}
-              />
+            <div className="flex flex-col gap-2 border-t border-divider pt-3 text-[13px]">
+              <div className="flex items-center gap-2">
+                <span className="w-28 text-muted">Count from</span>
+                <Dropdown
+                  label="Count from"
+                  value={from ?? defaultFrom}
+                  options={[
+                    { value: 'due', label: 'The due date' },
+                    { value: 'done', label: 'When I finish it' },
+                  ]}
+                  onChange={(v) => onFromChange(v === defaultFrom ? null : (v as 'due' | 'done'))}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-28 text-muted">On a weekend</span>
+                <Dropdown
+                  label="When a repeat lands on a weekend"
+                  value={rule.weekend ?? 'default'}
+                  options={[
+                    { value: 'default', label: `Use my setting (${defaultWeekend})` },
+                    { value: 'keep', label: 'Keep it' },
+                    { value: 'friday', label: 'Move to Friday' },
+                    { value: 'monday', label: 'Move to Monday' },
+                  ]}
+                  onChange={(v) => {
+                    const { weekend: _drop, ...rest } = rule
+                    onChange((v === 'default' ? rest : { ...rest, weekend: v }) as RepeatRule)
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { diffDays, formatDate, formatTime } from '../lib/dates'
 import { priorityStyles, statusColors, useTasks, type Priority, type Status, type Task } from '../lib/tasks'
 import { Button, MenuItem, Modal, Pill, Popover, useToast } from './ui'
@@ -54,9 +54,9 @@ export function PriorityPill({ priority }: { priority: Priority }) {
   )
 }
 
-export function StatusPill({ status }: { status: Status }) {
+export function StatusPill({ status, className }: { status: Status; className?: string }) {
   return (
-    <Pill bg={status.color_bg} text={status.color_text}>
+    <Pill bg={status.color_bg} text={status.color_text} className={className}>
       {status.name}
     </Pill>
   )
@@ -90,9 +90,14 @@ export function StatusPicker({ status, onPick, onEdit }: { status: Status; onPic
   return (
     <Popover
       trigger={({ toggle, open }) => (
-        <button type="button" aria-expanded={open} onClick={toggle} className="inline-flex items-center gap-1 rounded-full focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none">
-          <StatusPill status={status} />
-          <span className="text-xs text-faint">▾</span>
+        <button
+          type="button"
+          aria-label={`Status: ${status.name}. Change status`}
+          aria-expanded={open}
+          onClick={toggle}
+          className="rounded-full ring-offset-2 transition-shadow hover:ring-2 hover:ring-border focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+        >
+          <StatusPill status={status} className="h-8 cursor-pointer px-4 text-[13px]" />
         </button>
       )}
     >
@@ -132,6 +137,25 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
   const toast = useToast()
   const [colorFor, setColorFor] = useState<string | null>(null)
 
+  // The color choices close when you pick one, click anywhere else, or press Escape.
+  useEffect(() => {
+    if (!colorFor) return
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-color-ui]')) setColorFor(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setColorFor(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [colorFor])
+
   return (
     <Modal
       open={open}
@@ -146,13 +170,14 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
         </>
       }
     >
-      <p className="mb-3 text-[13px] text-muted">Rename a stage, change its color, or put the stages in the order you work. Done, Canceled, and Waiting stay, but you can rename and recolor them.</p>
+      <p className="mb-3 text-[13px] text-muted">Rename a stage, change its color, or put the stages in the order you work. Done, Canceled, and Waiting are required, but you can rename and recolor them.</p>
       <div className="flex flex-col">
         {statuses.map((s, i) => (
           <div key={s.id} className="flex flex-col gap-2 border-t border-divider py-2 first:border-t-0">
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                data-color-ui
                 title="Change color"
                 aria-label={`Change color for ${s.name}`}
                 onClick={() => setColorFor(colorFor === s.id ? null : s.id)}
@@ -167,7 +192,7 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
                   if (!name) e.target.value = s.name
                   else if (name !== s.name) updateStatus(s.id, { name })
                 }}
-                className="h-9 min-w-0 flex-1 rounded-lg border border-transparent px-2 text-sm font-medium hover:border-border focus:border-border focus:outline-none"
+                className="h-9 min-w-0 flex-1 rounded-lg border-[1.5px] border-transparent px-2 text-sm font-medium hover:border-field focus:border-field focus:outline-none"
               />
               <StatusPill status={s} />
               <button type="button" aria-label="Move up" disabled={i === 0} onClick={() => moveStatus(s.id, -1)} className="size-8 rounded-lg text-muted hover:bg-divider disabled:opacity-30">
@@ -177,11 +202,11 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
                 ↓
               </button>
               {s.built_in ? (
-                <span className="w-12 text-center text-xs text-faint">Built in</span>
+                <span className="w-16 text-center text-xs text-faint">Required</span>
               ) : (
                 <button
                   type="button"
-                  className="w-12 text-center text-xs text-[#B3261E] hover:underline"
+                  className="w-16 text-center text-xs text-[#B3261E] hover:underline"
                   onClick={async () => {
                     if (!(await deleteStatus(s.id))) toast('Some tasks still use that stage. Move them first.')
                   }}
@@ -191,13 +216,16 @@ export function StatusEditor({ open, onClose }: { open: boolean; onClose: () => 
               )}
             </div>
             {colorFor === s.id && (
-              <div className="flex flex-wrap gap-2 pl-8">
+              <div data-color-ui className="flex flex-wrap gap-2 pl-8">
                 {statusColors.map((c) => (
                   <button
                     key={c.bg}
                     type="button"
                     aria-label="Pick this color"
-                    onClick={() => updateStatus(s.id, { color_bg: c.bg, color_text: c.text })}
+                    onClick={() => {
+                      updateStatus(s.id, { color_bg: c.bg, color_text: c.text })
+                      setColorFor(null)
+                    }}
                     className="flex h-6 items-center rounded-full px-2.5 text-xs font-medium"
                     style={{ background: c.bg, color: c.text, outline: c.bg === s.color_bg ? `2px solid ${c.text}` : undefined }}
                   >

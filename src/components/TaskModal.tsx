@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { addDays, formatDate, isWeekend, moveOffWeekend, weekdayNames, weekdayOf, hhmm } from '../lib/dates'
+import { formatDate } from '../lib/dates'
 import { priorityStyles, useTasks, type Priority, type Task } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
+import { DatePicker, TimePicker } from './pickers'
 import RepeatPicker from './RepeatPicker'
 import { Checkbox, StatusEditor, StatusPicker } from './taskParts'
 import { Button, MenuItem, Modal, MoreMenu } from './ui'
@@ -15,7 +16,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-const inputCls = 'h-9 rounded-lg border border-border bg-surface px-2.5 text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
+const inputCls = 'h-9 rounded-lg border-[1.5px] border-field bg-surface px-2.5 text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
 
 // The open task: a centered pop-up. Everything saves as you go.
 export default function TaskModal({ taskId, onClose }: { taskId: string; onClose: () => void }) {
@@ -82,8 +83,6 @@ function Inner(p: InnerProps) {
     p.onClose()
   }
 
-  const [keptDate, setKeptDate] = useState<string | null>(null)
-  const weekendDue = task.due_date && isWeekend(task.due_date) && workspace.weekend_rule === 'ask' && keptDate !== task.due_date
 
   if (!status) return null
   return (
@@ -93,9 +92,8 @@ function Inner(p: InnerProps) {
         wide
         onClose={close}
         title="Tasks"
-        footer={
-          <>
-            <MoreMenu side="top">
+        headerActions={
+            <MoreMenu>
               {(closeMenu) => (
                 <div className="w-48">
                   <MenuItem
@@ -131,7 +129,9 @@ function Inner(p: InnerProps) {
                 </div>
               )}
             </MoreMenu>
-            <span className="text-xs text-faint">Saved automatically</span>
+        }
+        footer={
+          <>
             {done ? (
               <Button
                 onClick={() => {
@@ -147,12 +147,12 @@ function Inner(p: InnerProps) {
                 onClick={() => {
                   flush()
                   if (doneStatus) setStatus(task, doneStatus.id)
-                  p.onClose()
                 }}
               >
                 Mark done
               </Button>
             )}
+            <span className="text-xs text-faint">Saved automatically</span>
           </>
         }
       >
@@ -165,7 +165,7 @@ function Inner(p: InnerProps) {
             onChange={(e) => setTitle(e.target.value)}
             onBlur={flush}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            className={`w-full rounded-lg border border-transparent px-2 py-1 text-xl font-semibold tracking-tight placeholder:text-faint hover:border-border focus:border-border focus:outline-none ${done ? 'text-faint line-through' : ''}`}
+            className={`w-full rounded-lg border-[1.5px] border-transparent px-2 py-1 text-xl font-semibold tracking-tight placeholder:text-faint hover:border-field focus:border-field focus:outline-none ${done ? 'text-faint line-through' : ''}`}
           />
           <div className="px-2">
             <StatusPicker status={status} onPick={(id) => setStatus(task, id)} onEdit={() => p.setEditingStages(true)} />
@@ -177,26 +177,21 @@ function Inner(p: InnerProps) {
                 <span className="w-24 font-semibold text-waiting">Waiting since</span>
                 <span>{task.waiting_since ? formatDate(task.waiting_since, today) : 'Today'}</span>
               </div>
-              <div className="flex items-center gap-3 text-[13px]">
-                <span className="w-24 font-semibold text-waiting">Waiting on</span>
-                <input
+              <div className="flex items-start gap-3 text-[13px]">
+                <span className="w-24 pt-2 font-semibold text-waiting">Waiting on</span>
+                <textarea
                   aria-label="Waiting on"
-                  placeholder="A person or a thing, like “Jordan” or “the contract”"
+                  rows={2}
+                  placeholder="A person or a thing, like “Jordan” or “the signed contract”"
                   value={waitingOn}
                   onChange={(e) => setWaitingOn(e.target.value)}
                   onBlur={flush}
-                  className={`${inputCls} flex-1`}
+                  className={`${inputCls} h-auto min-h-[56px] flex-1 resize-y py-2 leading-relaxed`}
                 />
               </div>
               <div className="flex items-center gap-3 text-[13px]">
                 <span className="w-24 font-semibold text-waiting">Check in</span>
-                <input
-                  aria-label="Check in date"
-                  type="date"
-                  value={task.waiting_check_in ?? ''}
-                  onChange={(e) => updateTask(task.id, { waiting_check_in: e.target.value || null })}
-                  className={inputCls}
-                />
+                <DatePicker label="Check in date" value={task.waiting_check_in} today={today} weekStart={workspace.week_start} placeholder="Pick a date" onChange={(d) => updateTask(task.id, { waiting_check_in: d })} />
                 <span className="text-xs text-muted">The day to look at this again</span>
               </div>
             </div>
@@ -204,51 +199,14 @@ function Inner(p: InnerProps) {
 
           <div className="flex flex-col">
             <Field label="Due">
-              <input
-                aria-label="Due date"
-                type="date"
-                value={task.due_date ?? ''}
-                onChange={(e) => updateTask(task.id, { due_date: e.target.value || null, ...(e.target.value ? {} : { due_time: null }) })}
-                className={inputCls}
+              <DatePicker
+                label="Due date"
+                value={task.due_date}
+                today={today}
+                weekStart={workspace.week_start}
+                onChange={(due_date) => updateTask(task.id, { due_date, repeat_anchor: null, ...(due_date ? {} : { due_time: null }) })}
               />
-              {task.due_date && (
-                <input
-                  aria-label="Due time"
-                  type="time"
-                  value={task.due_time ? hhmm(task.due_time) : ''}
-                  onChange={(e) => updateTask(task.id, { due_time: e.target.value || null })}
-                  className={inputCls}
-                />
-              )}
-              {task.due_date && (
-                <button type="button" onClick={() => updateTask(task.id, { due_date: null, due_time: null })} className="text-xs text-muted hover:text-ink">
-                  Clear
-                </button>
-              )}
-              {!task.due_date && (
-                <>
-                  <Button size="sm" variant="quiet" onClick={() => updateTask(task.id, { due_date: today })}>
-                    Today
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => updateTask(task.id, { due_date: addDays(today, 1) })}>
-                    Tomorrow
-                  </Button>
-                </>
-              )}
-              {weekendDue && task.due_date && (
-                <div className="flex w-full flex-wrap items-center gap-2 rounded-lg bg-accent-tint px-3 py-2 text-[13px]">
-                  <span>That’s a {weekdayNames[weekdayOf(task.due_date)]}.</span>
-                  <Button size="sm" variant="quiet" onClick={() => setKeptDate(task.due_date)}>
-                    Keep it
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => updateTask(task.id, { due_date: moveOffWeekend(task.due_date!, 'friday') })}>
-                    Move to Friday
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => updateTask(task.id, { due_date: moveOffWeekend(task.due_date!, 'monday') })}>
-                    Move to Monday
-                  </Button>
-                </div>
-              )}
+              {task.due_date && <TimePicker label="Due time" value={task.due_time} onChange={(due_time) => updateTask(task.id, { due_time })} />}
             </Field>
             <Field label="Repeat">
               <RepeatPicker
@@ -257,14 +215,15 @@ function Inner(p: InnerProps) {
                 today={today}
                 from={task.repeat_from}
                 defaultFrom={workspace.repeat_from}
-                onChange={(repeat_rule) => updateTask(task.id, { repeat_rule })}
+                defaultWeekend={{ ask: 'ask me', keep: 'keep it', friday: 'move to Friday', monday: 'move to Monday' }[workspace.weekend_rule]}
+                onChange={(repeat_rule) => updateTask(task.id, { repeat_rule, repeat_anchor: null })}
                 onFromChange={(repeat_from) => updateTask(task.id, { repeat_from })}
               />
             </Field>
             {workspace.priorities_on && (
               <Field label="Priority">
                 <div className="flex gap-1.5">
-                  {(['none', 'low', 'medium', 'high'] as Priority[]).map((pr) => {
+                  {(['none', 'low', 'medium', 'high', 'urgent'] as Priority[]).map((pr) => {
                     const active = task.priority === pr
                     const style = pr === 'none' ? null : priorityStyles[pr]
                     return (
@@ -300,7 +259,7 @@ function Inner(p: InnerProps) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               onBlur={flush}
-              className="w-full resize-y rounded-xl border border-border bg-surface p-3 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              className="w-full resize-y rounded-xl border-[1.5px] border-field bg-surface p-3 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             />
           </div>
 
@@ -344,7 +303,7 @@ function Inner(p: InnerProps) {
                   p.setNewSub('')
                   await addTask({ title, parent_task_id: task.id })
                 }}
-                className="h-9 rounded-lg border border-dashed border-border bg-transparent px-3 text-sm placeholder:text-faint focus:border-solid focus:outline-none"
+                className="h-9 rounded-lg border-[1.5px] border-dashed border-field bg-transparent px-3 text-sm placeholder:text-faint focus:border-solid focus:outline-none"
               />
             </div>
           )}

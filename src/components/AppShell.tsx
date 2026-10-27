@@ -64,7 +64,7 @@ export default function AppShell() {
         <NavItem to="/" end label="Home" Icon={HomeIcon} expanded={expanded} />
         {visibleAreas.map((a) => (
           // Home stays pinned on top. Press and hold an area below it to drag. The ⋮⋮ on hover hints that it moves.
-          <div key={a.key} {...dragProps(a.key)} className={['group relative select-none [-webkit-user-drag:none]', dragging === a.key ? 'z-10 cursor-grabbing rounded-xl bg-surface shadow-[0_4px_14px_rgba(20,20,30,0.12)]' : ''].join(' ')}>
+          <div key={a.key} {...dragProps(a.key)} className={['group relative select-none transition-[transform,box-shadow] duration-150 ease-out [-webkit-user-drag:none]', dragging === a.key ? 'z-10 scale-[1.08] cursor-grabbing rounded-xl bg-surface shadow-[0_8px_22px_rgba(20,20,30,0.18)]' : ''].join(' ')}>
             <span className="pointer-events-none absolute top-1/2 -left-3 -translate-y-1/2 cursor-grab text-faint opacity-0 group-hover:opacity-100">
               <GripIcon size={12} />
             </span>

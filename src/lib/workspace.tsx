@@ -12,9 +12,10 @@ export type Workspace = {
   areas_order: string[]
   time_zone: string
   week_start: 'sunday' | 'monday'
-  weekend_rule: 'ask' | 'friday' | 'monday'
+  weekend_rule: 'ask' | 'keep' | 'friday' | 'monday'
   comments_on: boolean
   priorities_on: boolean
+  auto_complete_parent: boolean
   morning_ends: string
   afternoon_ends: string
   default_due: 'none' | 'today'
