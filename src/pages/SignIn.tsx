@@ -92,7 +92,14 @@ export default function SignIn() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main
+      className="flex min-h-screen items-center justify-center p-6"
+      // A faint blush of the accent tint behind the card, fading into the canvas.
+      style={{
+        background:
+          'radial-gradient(ellipse 55% 60% at 50% 48%, #F2E7EE 0%, rgba(244, 236, 241, 0.5) 35%, rgba(246, 246, 248, 0) 70%)',
+      }}
+    >
       <div className="w-full max-w-sm">
         <h1 className="mb-6 text-center font-display text-4xl font-medium text-accent">Odessi</h1>
         <div className="rounded-2xl border border-border bg-surface p-7 shadow-card">
