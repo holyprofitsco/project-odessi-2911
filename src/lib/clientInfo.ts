@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useClients, type Client, type Note, type Person } from './clients'
+import { useProjects } from './projects'
 import { useTasks, type Task } from './tasks'
 
 // "Dana" from "Dana Whitfield". A title like "Dr." keeps the next word: "Dr. Anne".
@@ -24,6 +25,7 @@ export const cleanWaiting = (text: string) => text.replace(/^\s*waiting on\s*/i,
 export function useClientInfo() {
   const { clients, people, notes, connections, fields, valueOf } = useClients()
   const { tasks, statusById } = useTasks()
+  const { projects } = useProjects()
 
   const peopleOf = useCallback(
     (clientId: string) => people.filter((p) => p.client_id === clientId).sort((a, b) => Number(b.is_main_contact) - Number(a.is_main_contact) || a.sort_order - b.sort_order),
@@ -69,9 +71,13 @@ export function useClientInfo() {
       const person = personFor(t)
       if (person) return clients.find((c) => c.id === person.client_id)
       const link = connections.find((c) => c.from_id === t.id && c.to_type === 'client')
-      return clients.find((c) => c.id === link?.to_id)
+      const linked = clients.find((c) => c.id === link?.to_id)
+      if (linked) return linked
+      // Tasks in a client project belong to that client.
+      const project = projects.find((p) => p.id === t.project_id)
+      return clients.find((c) => c.id === project?.client_id)
     },
-    [clients, connections, personFor],
+    [clients, connections, personFor, projects],
   )
 
   // The client or person a task is tagged as waiting on: "Dana", "Jordan", or "Bright Path Co.".

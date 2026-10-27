@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button, Modal, Switch, useToast } from '../components/ui'
-import { formatDate, isWeekend, moveOffWeekend, nextRepeatDate, todayISO, type RepeatRule, type WeekendChoice } from './dates'
+import { addDays, formatDate, isWeekend, moveOffWeekend, nextRepeatDate, todayISO, type RepeatRule, type WeekendChoice } from './dates'
 import { supabase } from './supabase'
 import { useWorkspace } from './workspace'
 
@@ -34,12 +34,21 @@ export type Task = {
   waiting_on_text: string
   waiting_on_client_id: string | null
   waiting_on_person_id: string | null
+  waiting_on_task_id: string | null
+  project_id: string | null
+  phase_id: string | null
+  milestone_id: string | null
   waiting_since: string | null
   waiting_check_in: string | null
   order_in_group: number
   done_at: string | null
   created_at: string
 }
+
+// "B can't start until A is done": task_id = B, waits_on_task_id = A. Auto ones come from "Do in order".
+export type Dependency = { id: string; task_id: string; waits_on_task_id: string; auto: boolean }
+
+export const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`)
 
 // Priority pills are a fixed set with fixed colors from the design system.
 export const priorityStyles: Record<Exclude<Priority, 'none'>, { label: string; bg: string; text: string }> = {
@@ -86,17 +95,31 @@ type TasksState = {
   countIn: (id: string) => number
   moveAndDelete: (id: string, toId: string) => Promise<void>
   noun: string
+  dependencies: Dependency[]
+  addTasks: (rows: Partial<Task>[]) => Promise<Task[]>
+  addDependencies: (rows: { task_id: string; waits_on_task_id: string; auto: boolean }[]) => Promise<void>
+  blockersOf: (taskId: string) => Task[]
+  holdingUp: (taskId: string) => Task[]
+  isBlocked: (task: Task) => boolean
+  wouldLoop: (taskId: string, waitsOnId: string) => boolean
+  addDependency: (taskId: string, waitsOnId: string, auto?: boolean) => Promise<boolean>
+  removeDependency: (taskId: string, waitsOnId: string) => Promise<void>
+  syncAuto: (taskIds: string[], pairs: [string, string][]) => Promise<void>
+  changeDue: (task: Task, date: string | null) => Promise<void>
+  quickAdd: (text: string, changes?: Partial<Task>) => Promise<Task | null>
 }
 
 const TasksContext = createContext<TasksState | null>(null)
 
-const NEXT_FIELDS = ['title', 'priority', 'due_time', 'notes', 'repeat_rule', 'repeat_from'] as const
+const NEXT_FIELDS = ['title', 'priority', 'due_time', 'notes', 'repeat_rule', 'repeat_from', 'project_id', 'phase_id', 'milestone_id'] as const
 
 export function TasksProvider({ children }: { children: ReactNode }) {
   const { workspace } = useWorkspace()
   const toast = useToast()
   const [statuses, setStatuses] = useState<Status[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [deps, setDeps] = useState<Dependency[]>([])
+  const [slip, setSlip] = useState<{ task: Task; days: number; after: Task[] } | null>(null)
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<{ task: Task; date: string; nominal: string; holder: { id?: string } } | null>(null)
   const [remember, setRemember] = useState(false)
@@ -106,12 +129,14 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!workspaceId) return
     ;(async () => {
-      const [s, t] = await Promise.all([
+      const [s, t, d] = await Promise.all([
         supabase.from('statuses').select('*').eq('workspace_id', workspaceId).eq('area', 'task').order('sort_order'),
         supabase.from('tasks').select('*').eq('workspace_id', workspaceId).order('created_at'),
+        supabase.from('dependencies').select('*').eq('workspace_id', workspaceId),
       ])
       if (s.data) setStatuses(s.data)
       if (t.data) setTasks(t.data)
+      if (d.data) setDeps(d.data)
       setLoading(false)
     })()
   }, [workspaceId])
@@ -157,6 +182,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
 
   const deleteTask = useCallback(async (id: string) => {
     setTasks((list) => list.filter((t) => t.id !== id && t.parent_task_id !== id))
+    setDeps((list) => list.filter((d) => d.task_id !== id && d.waits_on_task_id !== id))
     await supabase.from('tasks').delete().eq('id', id)
   }, [])
 
@@ -171,6 +197,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
 
   const deleteMany = useCallback(async (ids: string[]) => {
     setTasks((list) => list.filter((t) => !ids.includes(t.id) && !ids.includes(t.parent_task_id ?? '')))
+    setDeps((list) => list.filter((d) => !ids.includes(d.task_id) && !ids.includes(d.waits_on_task_id)))
     await supabase.from('tasks').delete().in('id', ids)
   }, [])
 
@@ -194,6 +221,144 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [addTask, tasks],
   )
 
+  /* Dependencies: "Can't start until", "Do in order", and Waiting on another task. */
+
+  const finished = useCallback((t: Task | undefined) => !t || ['done', 'canceled'].includes(statusById(t.status_id)?.behavior ?? ''), [statusById])
+  const blockersOf = useCallback(
+    (taskId: string) => deps.filter((d) => d.task_id === taskId).map((d) => tasks.find((t) => t.id === d.waits_on_task_id)).filter((t): t is Task => !!t),
+    [deps, tasks],
+  )
+  const holdingUp = useCallback(
+    (taskId: string) => deps.filter((d) => d.waits_on_task_id === taskId).map((d) => tasks.find((t) => t.id === d.task_id)).filter((t): t is Task => !!t),
+    [deps, tasks],
+  )
+  const isBlocked = useCallback((task: Task) => blockersOf(task.id).some((b) => !finished(b)), [blockersOf, finished])
+
+  // Would "taskId waits on waitsOnId" make a loop? Walks back from waitsOnId through what it waits on.
+  const wouldLoop = useCallback(
+    (taskId: string, waitsOnId: string) => {
+      if (taskId === waitsOnId) return true
+      const seen = new Set<string>()
+      const stack = [waitsOnId]
+      while (stack.length) {
+        const id = stack.pop()!
+        if (id === taskId) return true
+        if (seen.has(id)) continue
+        seen.add(id)
+        for (const d of deps) if (d.task_id === id) stack.push(d.waits_on_task_id)
+      }
+      return false
+    },
+    [deps],
+  )
+
+  const addDependency = useCallback(
+    async (taskId: string, waitsOnId: string, auto = false) => {
+      if (!workspaceId || deps.some((d) => d.task_id === taskId && d.waits_on_task_id === waitsOnId)) return true
+      if (wouldLoop(taskId, waitsOnId)) {
+        toast("That would make a loop, since that task already waits on this one.")
+        return false
+      }
+      const { data, error } = await supabase.from('dependencies').insert({ workspace_id: workspaceId, task_id: taskId, waits_on_task_id: waitsOnId, auto }).select().single()
+      // Already linked (say, by "Do in order" a moment ago): nothing more to do.
+      if (error?.code === '23505') return true
+      if (error || !data) {
+        toast("Couldn't save that. Try again in a moment.")
+        return false
+      }
+      setDeps((list) => [...list, data])
+      return true
+    },
+    [workspaceId, deps, wouldLoop, toast],
+  )
+
+  const removeDependency = useCallback(async (taskId: string, waitsOnId: string) => {
+    setDeps((list) => list.filter((d) => !(d.task_id === taskId && d.waits_on_task_id === waitsOnId)))
+    await supabase.from('dependencies').delete().eq('task_id', taskId).eq('waits_on_task_id', waitsOnId)
+  }, [])
+
+  // Makes the automatic ("Do in order") links for these tasks match the wanted pairs [task, waits on].
+  const syncAuto = useCallback(
+    async (taskIds: string[], pairs: [string, string][]) => {
+      if (!workspaceId) return
+      const want = new Set(pairs.map(([a, b]) => `${a}>${b}`))
+      const stale = deps.filter((d) => d.auto && taskIds.includes(d.task_id) && !want.has(`${d.task_id}>${d.waits_on_task_id}`))
+      const have = new Set(deps.map((d) => `${d.task_id}>${d.waits_on_task_id}`))
+      const missing = pairs.filter(([a, b]) => !have.has(`${a}>${b}`))
+      if (!stale.length && !missing.length) return
+      if (stale.length) {
+        setDeps((list) => list.filter((d) => !stale.includes(d)))
+        await supabase.from('dependencies').delete().in('id', stale.map((d) => d.id))
+      }
+      for (const [a, b] of missing) {
+        const { data } = await supabase.from('dependencies').insert({ workspace_id: workspaceId, task_id: a, waits_on_task_id: b, auto: true }).select().single()
+        if (data) setDeps((list) => [...list, data])
+      }
+    },
+    [workspaceId, deps],
+  )
+
+  // Adds many tasks at once (task sets, templates). Rows may carry their own ids.
+  const addTasks = useCallback(
+    async (rows: Partial<Task>[]) => {
+      if (!workspaceId || !firstOpenStatus || !rows.length) return []
+      const full = rows.map((r) => ({ workspace_id: workspaceId, status_id: firstOpenStatus.id, id: newId(), ...r }))
+      const { data, error } = await supabase.from('tasks').insert(full).select()
+      if (error || !data) {
+        toast("Couldn't add those tasks. Try again in a moment.")
+        return []
+      }
+      setTasks((t) => [...t, ...data])
+      return data as Task[]
+    },
+    [workspaceId, firstOpenStatus, toast],
+  )
+
+  // Many links at once, for task sets and templates whose tasks are brand new (so no loops are possible).
+  const addDependencies = useCallback(
+    async (rows: { task_id: string; waits_on_task_id: string; auto: boolean }[]) => {
+      if (!workspaceId || !rows.length) return
+      const { data } = await supabase.from('dependencies').insert(rows.map((r) => ({ ...r, workspace_id: workspaceId }))).select()
+      if (data) setDeps((list) => [...list, ...data])
+    },
+    [workspaceId],
+  )
+
+  // Changing a due date. If the task holds others up and its date moves later, offer to move the tasks after it too.
+  const changeDue = useCallback(
+    async (task: Task, date: string | null) => {
+      await updateTask(task.id, { due_date: date, repeat_anchor: null, ...(date ? {} : { due_time: null }) })
+      if (!task.due_date || !date || date <= task.due_date) return
+      const after: Task[] = []
+      const walk = (id: string) => {
+        for (const d of deps) {
+          if (d.waits_on_task_id !== id) continue
+          const t = tasks.find((x) => x.id === d.task_id)
+          if (t && !after.includes(t) && !finished(t)) {
+            after.push(t)
+            walk(t.id)
+          }
+        }
+      }
+      walk(task.id)
+      const dated = after.filter((t) => t.due_date)
+      if (dated.length) setSlip({ task, days: Math.round((Date.parse(date) - Date.parse(task.due_date)) / 86_400_000), after: dated })
+    },
+    [updateTask, deps, tasks, finished],
+  )
+
+  // "Edit video after Film video" makes "Edit video" wait on the task called "Film video".
+  const quickAdd = useCallback(
+    async (text: string, changes: Partial<Task> = {}) => {
+      const m = /^(.+?)\s+after\s+(.+)$/i.exec(text.trim())
+      const before = m ? tasks.find((t) => t.title.trim().toLowerCase() === m[2].trim().toLowerCase() && !finished(t)) : undefined
+      const t = await addTask({ ...changes, title: before ? m![1].trim() : text.trim() })
+      if (t && before) await addDependency(t.id, before.id)
+      return t
+    },
+    [tasks, finished, addTask, addDependency],
+  )
+
   const setStatusRef = useRef<((task: Task, statusId: string) => Promise<void>) | null>(null)
   const setStatus = useCallback(
     async (task: Task, statusId: string) => {
@@ -202,7 +367,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       if (!next || !prev || next.id === prev.id) return
       const changes: Partial<Task> = { status_id: statusId, done_at: next.behavior === 'done' ? new Date().toISOString() : null }
       if (next.behavior === 'waiting') changes.waiting_since = task.waiting_since ?? today
-      else if (prev.behavior === 'waiting') Object.assign(changes, { waiting_since: null, waiting_check_in: null, waiting_on_text: '', waiting_on_client_id: null, waiting_on_person_id: null })
+      else if (prev.behavior === 'waiting') Object.assign(changes, { waiting_since: null, waiting_check_in: null, waiting_on_text: '', waiting_on_client_id: null, waiting_on_person_id: null, waiting_on_task_id: null })
       const snapshot: Partial<Task> = {
         status_id: task.status_id,
         done_at: task.done_at,
@@ -211,6 +376,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         waiting_on_text: task.waiting_on_text,
         waiting_on_client_id: task.waiting_on_client_id,
         waiting_on_person_id: task.waiting_on_person_id,
+        waiting_on_task_id: task.waiting_on_task_id,
       }
       await updateTask(task.id, changes)
 
@@ -234,9 +400,28 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const message = next.behavior === 'done' ? 'Marked done' : next.behavior === 'canceled' ? 'Task canceled' : null
+      // Tasks that were only waiting on this one are free now. Ones set to Waiting flip back to the first open status.
+      const freed: Task[] = []
+      if (next.behavior === 'done' && prev.behavior !== 'done') {
+        for (const d of deps.filter((x) => x.waits_on_task_id === task.id)) {
+          const t = tasks.find((x) => x.id === d.task_id)
+          if (!t || finished(t)) continue
+          const others = deps.filter((x) => x.task_id === t.id && x.waits_on_task_id !== task.id)
+          if (others.every((x) => finished(tasks.find((y) => y.id === x.waits_on_task_id)))) freed.push(t)
+        }
+      }
+      const flipped = freed.filter((t) => statusById(t.status_id)?.behavior === 'waiting' && t.waiting_on_task_id === task.id)
+      if (firstOpenStatus) {
+        for (const t of flipped) {
+          await updateTask(t.id, { status_id: firstOpenStatus.id, waiting_since: null, waiting_check_in: null, waiting_on_text: '', waiting_on_task_id: null })
+        }
+      }
+
+      const message =
+        next.behavior === 'done' ? (freed.length ? `Marked done. You're up on “${freed[0].title}”.` : 'Marked done') : next.behavior === 'canceled' ? 'Task canceled' : null
       if (message) {
         toast(message, async () => {
+          for (const t of flipped) await updateTask(t.id, { status_id: t.status_id, waiting_since: t.waiting_since, waiting_check_in: t.waiting_check_in, waiting_on_text: t.waiting_on_text, waiting_on_task_id: t.waiting_on_task_id })
           await updateTask(task.id, snapshot)
           setPending((p) => (p?.holder === holder ? null : p))
           if (holder.id) await deleteTask(holder.id)
@@ -251,7 +436,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         if (parent && allDone && statusById(parent.status_id)?.behavior !== 'done') await setStatusRef.current?.(parent, statusId)
       }
     },
-    [statusById, updateTask, today, workspace, createNext, deleteTask, toast, tasks],
+    [statusById, updateTask, today, workspace, createNext, deleteTask, toast, tasks, deps, finished, firstOpenStatus],
   )
   setStatusRef.current = setStatus
 
@@ -361,9 +546,50 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         countIn,
         moveAndDelete,
         noun: 'tasks',
+        dependencies: deps,
+        addTasks,
+        addDependencies,
+        blockersOf,
+        holdingUp,
+        isBlocked,
+        wouldLoop,
+        addDependency,
+        removeDependency,
+        syncAuto,
+        changeDue,
+        quickAdd,
       }}
     >
       {children}
+      <Modal
+        open={!!slip}
+        onClose={() => setSlip(null)}
+        title={slip ? `Move the ${slip.after.length === 1 ? 'task' : `${slip.after.length} tasks`} after it too?` : ''}
+        footer={
+          <>
+            <span />
+            <div className="flex gap-2">
+              <Button onClick={() => setSlip(null)}>Just this one</Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  const s = slip
+                  setSlip(null)
+                  if (s) for (const t of s.after) await updateTask(t.id, { due_date: addDays(t.due_date!, s.days), repeat_anchor: null })
+                }}
+              >
+                Move {slip && slip.after.length > 1 ? 'them' : 'it'} {slip?.days} {slip?.days === 1 ? 'day' : 'days'} later
+              </Button>
+            </div>
+          </>
+        }
+      >
+        {slip && (
+          <p className="text-sm leading-relaxed text-muted">
+            “{slip.task.title}” moved {slip.days} {slip.days === 1 ? 'day' : 'days'} later, and {slip.after.map((t) => `“${t.title}”`).join(', ')} {slip.after.length === 1 ? 'waits' : 'wait'} on it.
+          </p>
+        )}
+      </Modal>
       <Modal
         open={!!pending}
         onClose={() => choose('keep')}

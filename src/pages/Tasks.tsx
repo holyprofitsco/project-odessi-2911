@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
-import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { MenuWithHint, SaveAsTaskSetModal, SplitButton, TaskSetMenu, TaskSetUseModal } from '../components/projectParts'
+import { useProjects, type TaskSet } from '../lib/projects'
 import TaskModal from '../components/TaskModal'
 import { StageMenu } from '../components/clientParts'
 import { Checkbox, DueText, PriorityPill, RepeatIcon, StatusPill } from '../components/taskParts'
@@ -11,7 +13,7 @@ import { useClientInfo } from '../lib/clientInfo'
 import { useWorkspace } from '../lib/workspace'
 
 type Tab = 'today' | 'upcoming' | 'all'
-type Group = 'time' | 'status' | 'client' | 'none'
+type Group = 'time' | 'status' | 'client' | 'project' | 'none'
 type Sort = 'due' | 'priority' | 'name' | 'created' | 'manual'
 type BoardGroup = 'status' | 'priority' | 'due'
 
@@ -46,6 +48,9 @@ export default function Tasks() {
   const { addTask, firstOpenStatus, today, loading } = useTasks()
   const openId = params.get('task')
   const open = (id: string | null) => setParams(id ? { task: id } : {})
+  const navigate = useNavigate()
+  const [pickSet, setPickSet] = useState(false)
+  const [useSet, setUseSet] = useState<TaskSet | null>(null)
 
   const newTask = async (changes: Partial<Task> = {}) => {
     const t = await addTask({ due_date: workspace?.default_due === 'today' ? today : null, ...changes })
@@ -74,10 +79,43 @@ export default function Tasks() {
           ))}
         </div>
         <div className="flex-1" />
-        <Button variant="primary" disabled={!firstOpenStatus} onClick={() => newTask()}>
-          + New task
-        </Button>
+        <SplitButton label="+ New task" disabled={!firstOpenStatus} onClick={() => newTask()} onMenu={() => setPickSet(false)}>
+          {(close) =>
+            pickSet ? (
+              <TaskSetMenu
+                onPick={(s) => {
+                  close()
+                  setPickSet(false)
+                  setUseSet(s)
+                }}
+                onManage={() => {
+                  close()
+                  navigate('/tasks/sets')
+                }}
+              />
+            ) : (
+              <>
+                <MenuWithHint
+                  title="New task"
+                  onClick={() => {
+                    close()
+                    newTask()
+                  }}
+                />
+                <MenuWithHint title="From a task set…" hint="Reusable groups of tasks with dates like Day 1, Day 3" onClick={() => setPickSet(true)} />
+                <MenuWithHint
+                  title="Manage task sets"
+                  onClick={() => {
+                    close()
+                    navigate('/tasks/sets')
+                  }}
+                />
+              </>
+            )
+          }
+        </SplitButton>
       </div>
+      <TaskSetUseModal set={useSet} onClose={() => setUseSet(null)} />
 
       {loading ? null : board ? <BoardView onOpen={open} onNew={newTask} /> : <ListView onOpen={open} />}
       {openId && <TaskModal taskId={openId} onClose={() => open(null)} />}
@@ -110,7 +148,8 @@ const sorters: Record<Sort, (a: Task, b: Task) => number> = {
 
 function ListView({ onOpen }: { onOpen: (id: string) => void }) {
   const tasksApi = useTasks()
-  const { today, statuses, statusById, setStatus, firstOpenStatus, addTask, setOrder } = tasksApi
+  const { today, statuses, statusById, setStatus, firstOpenStatus, quickAdd, setOrder, isBlocked } = tasksApi
+  const { projects } = useProjects()
   const { workspace } = useWorkspace()
   const toast = useToast()
   const { clientFor } = useClientInfo()
@@ -141,18 +180,27 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     const b = behavior(t)
     if (b === 'done') return tab === 'all' || (tab === 'today' && doneToday(t))
     if (tab === 'all') return true
+    // Tasks that can't start yet stay out of Today and Upcoming until the task before them is done.
+    if (isBlocked(t)) return false
     // Waiting tasks only come into Today on their check-in day. Until then they rest in a folded list at the bottom.
     if (tab === 'today') return b === 'waiting' ? !!t.waiting_check_in && t.waiting_check_in <= today : !!t.due_date && t.due_date <= today
     return b !== 'waiting' && !!t.due_date && t.due_date > today
   })
   const open = inTab.filter((t) => behavior(t) !== 'done').sort(sorters[sort])
-  const resting = tab === 'today' ? visible.filter((t) => behavior(t) === 'waiting' && !(t.waiting_check_in && t.waiting_check_in <= today)).sort(sorters[sort]) : []
+  const resting =
+    tab === 'today'
+      ? visible.filter((t) => behavior(t) !== 'done' && ((behavior(t) === 'waiting' && !(t.waiting_check_in && t.waiting_check_in <= today)) || (isBlocked(t) && !!t.due_date && t.due_date <= today))).sort(sorters[sort])
+      : []
   const done = inTab.filter((t) => behavior(t) === 'done').sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? ''))
 
   const sections: { key: string; title: string; tasks: Task[] }[] = []
   const push = (key: string, title: string, tasks: Task[]) => tasks.length && sections.push({ key, title, tasks })
 
-  if (group === 'client') {
+  if (group === 'project') {
+    const ofProject = (id: string) => open.filter((t) => t.project_id === id)
+    for (const p of [...projects].sort((a, b) => a.name.localeCompare(b.name))) push(p.id, p.name || 'Untitled project', ofProject(p.id))
+    push('none', 'No project', open.filter((t) => !projects.some((p) => p.id === t.project_id)))
+  } else if (group === 'client') {
     const named = open.map((t) => ({ t, c: clientFor(t) }))
     const seen = [...new Map(named.filter((x) => x.c).map((x) => [x.c!.id, x.c!])).values()].sort((a, b) => a.name.localeCompare(b.name))
     for (const c of seen) push(c.id, c.name || 'Untitled', named.filter((x) => x.c?.id === c.id).map((x) => x.t))
@@ -197,7 +245,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     const title = quick.trim()
     if (!title) return
     setQuick('')
-    await addTask({ title, due_date: chosenDate })
+    await quickAdd(title, { due_date: chosenDate })
     if (tab !== 'all' && (!chosenDate || (tab === 'today' ? chosenDate > today : chosenDate <= today))) {
       toast(chosenDate ? `Added for ${formatDate(chosenDate, today)}. You'll find it under ${tab === 'today' ? 'Upcoming' : 'Today'}.` : "Added with no date. You'll find it under All.")
     }
@@ -262,6 +310,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             { value: 'time', label: tab === 'today' ? 'Time of day' : 'Date' },
             { value: 'status', label: 'Status' },
             { value: 'client', label: 'Client' },
+            ...(workspace.areas_on.projects !== false ? [{ value: 'project' as Group, label: 'Project' }] : []),
             { value: 'none', label: 'None' },
           ]}
           onChange={(g) => {
@@ -317,7 +366,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             )}
             <Card>
               {s.tasks.map((t) => (
-                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} showClient={group !== 'client'} />
+                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} showClient={group !== 'client'} showProject={group !== 'project'} />
               ))}
             </Card>
           </div>
@@ -365,6 +414,7 @@ function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
   const { statuses, tasks, setStatus, updateMany, deleteMany, today } = useTasks()
   const { workspace } = useWorkspace()
   const [confirming, setConfirming] = useState(false)
+  const [saving, setSaving] = useState(false)
   const chosen = tasks.filter((t) => ids.includes(t.id))
   const barBtn = 'inline-flex h-9 items-center gap-1.5 rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] font-medium hover:bg-divider'
 
@@ -435,6 +485,9 @@ function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
             onClear()
           }}
         />
+        <button type="button" onClick={() => setSaving(true)} className={barBtn}>
+          Save as task set
+        </button>
         <button type="button" onClick={() => setConfirming(true)} className={`${barBtn} text-[#B3261E]`}>
           Delete
         </button>
@@ -442,6 +495,13 @@ function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
           ✕
         </button>
       </div>
+      <SaveAsTaskSetModal
+        tasks={saving ? chosen : null}
+        onClose={() => {
+          setSaving(false)
+          onClear()
+        }}
+      />
       <Modal
         open={confirming}
         onClose={() => setConfirming(false)}
@@ -475,6 +535,7 @@ function TaskRow({
   task,
   showStatus,
   showClient = true,
+  showProject = true,
   selected,
   anySelected,
   dragging,
@@ -488,6 +549,7 @@ function TaskRow({
   task: Task
   showStatus: boolean
   showClient?: boolean
+  showProject?: boolean
   selected: boolean
   anySelected: boolean
   dragging: boolean
@@ -498,7 +560,8 @@ function TaskRow({
   onDragEnd: () => void
   onDropOn: () => void
 }) {
-  const { statusById, tasks, today } = useTasks()
+  const { statusById, tasks, today, blockersOf } = useTasks()
+  const { projects } = useProjects()
   const { workspace } = useWorkspace()
   const { waitingName, clientFor } = useClientInfo()
   const status = statusById(task.status_id)
@@ -509,7 +572,10 @@ function TaskRow({
   const subs = tasks.filter((t) => t.parent_task_id === task.id)
   const subsDone = subs.filter((s) => statusById(s.status_id)?.behavior === 'done').length
   const since = task.waiting_since ? (diffDays(today, task.waiting_since) < 7 ? weekdayNames[weekdayOf(task.waiting_since)].slice(0, 3) : formatDate(task.waiting_since, today)) : 'today'
+  const blocker = done ? undefined : blockersOf(task.id).find((b) => !['done', 'canceled'].includes(statusById(b.status_id)?.behavior ?? ''))
   const waitingLine = status.behavior === 'waiting' ? `Waiting${who ? ` on ${who}` : ''} since ${since}` : null
+  const project = showProject ? projects.find((p) => p.id === task.project_id) : undefined
+  const context = [client?.name, project?.name].filter(Boolean).join(' · ')
 
   return (
     <div
@@ -546,9 +612,10 @@ function TaskRow({
       <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={() => onToggle(task)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
-        {(waitingLine || subs.length > 0 || task.repeat_rule || client) && (
+        {(waitingLine || blocker || subs.length > 0 || task.repeat_rule || context) && (
           <span className="flex items-center gap-2 text-xs text-faint">
-            {client && <span className="shrink-0 truncate text-muted">{client.name}</span>}
+            {context && <span className="shrink-0 truncate text-muted">{context}</span>}
+            {blocker && !waitingLine && <span className="truncate">Waiting on · {blocker.title}</span>}
             {waitingLine && (
               <span className="truncate text-waiting" title={waitingLine}>
                 {waitingLine}

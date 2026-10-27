@@ -1,0 +1,436 @@
+import { useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { InlineText } from '../components/clientParts'
+import { PlanRows, WhenControl } from '../components/PlanEditor'
+import { TemplateUseModal, useTemplateSources } from '../components/projectParts'
+import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover, Switch } from '../components/ui'
+import { shortDate } from '../lib/dates'
+import { layoutInfo, planCount, useProjects, weekRange, whenLabel, type Layout, type PlanGroup, type Template } from '../lib/projects'
+import { starters } from '../lib/starters'
+import { newId } from '../lib/tasks'
+
+const sizeLine = (layout: Layout, groups: PlanGroup[]) => {
+  const tasks = `${planCount(groups)} tasks`
+  if (layout === 'list') return tasks
+  const n = groups.length
+  return `${n} ${layout === 'phases' ? (n === 1 ? 'phase' : 'phases') : n === 1 ? 'milestone' : 'milestones'} · ${tasks}`
+}
+
+/* Manage templates: your own first, then the starters. Every row has the same three slots. */
+
+export default function Templates() {
+  const { addTemplate, deleteTemplate, today } = useProjects()
+  const { mine, ready } = useTemplateSources()
+  const navigate = useNavigate()
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<'used' | 'name'>('used')
+  const [using, setUsing] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<Template | null>(null)
+  const q = query.trim().toLowerCase()
+  const match = (s: { name: string; description: string }) => !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
+  const order = <T extends { name: string; used_count: number }>(list: T[]) => [...list].sort(sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.used_count - a.used_count || a.name.localeCompare(b.name))
+  const yours = order(mine.filter(match)) as Template[]
+  const starts = order(ready.filter(match)) as (typeof starters[number] & { id: string; used_count: number })[]
+
+  const customize = async (key: string) => {
+    const s = starters.find((x) => x.key === key)
+    if (!s) return
+    const t = await addTemplate({ name: s.name, description: s.description, layout: s.layout, count_from: s.count_from, groups: s.groups.map((g) => ({ ...g, id: newId(), items: g.items.map((i) => ({ ...i, id: newId() })) })), starter_key: s.key })
+    if (t) navigate(`/projects/templates/${t.id}`)
+  }
+  const blank = async () => {
+    const layout = 'phases'
+    const t = await addTemplate({ name: 'New template', layout, groups: [{ id: newId(), name: 'Phase 1', offset: 0, in_order: false, items: [] }] })
+    if (t) navigate(`/projects/templates/${t.id}`)
+  }
+
+  const grid = 'grid grid-cols-[minmax(0,1fr)_110px_170px_120px_220px] items-center gap-4'
+  const used = (t: { used_count: number; last_used?: string | null }) => (t.used_count ? `${t.used_count === 1 ? 'Once' : `${t.used_count} times`}${t.last_used ? ` · ${shortDate(t.last_used, today)}` : ''}` : '–')
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2">
+        <Link to="/projects" className="w-fit text-[13px] text-muted hover:text-ink">
+          ‹ Projects
+        </Link>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-semibold tracking-tight">Project templates</h1>
+          <div className="flex-1" />
+          <Button variant="primary" onClick={blank}>
+            + New template
+          </Button>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <input aria-label="Search templates" placeholder="Search templates" value={query} onChange={(e) => setQuery(e.target.value)} className="h-9 w-72 rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] focus:outline-none" />
+        <div className="flex-1" />
+        <span className="text-[13px] text-muted">Sort by:</span>
+        <Dropdown
+          label="Sort by"
+          value={sort}
+          options={[
+            { value: 'used', label: 'Most used' },
+            { value: 'name', label: 'Name' },
+          ]}
+          onChange={setSort}
+        />
+      </div>
+
+      <div className={`${grid} px-[18px] text-[11px] font-bold tracking-[0.06em] text-faint uppercase`}>
+        <span>Template</span>
+        <span>Layout</span>
+        <span>Size</span>
+        <span>Used</span>
+        <span />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <h2 className="px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Your templates · {yours.length}</h2>
+        <Card>
+          {yours.map((t) => (
+            <div key={t.id} className={`${grid} min-h-[58px] border-divider px-[18px] py-2 [&+&]:border-t`}>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-sm font-medium">{t.name || 'Untitled template'}</span>
+                <span className="truncate text-xs text-muted">{t.description}</span>
+              </span>
+              <span className="text-[13px] text-muted">{layoutInfo[t.layout].label}</span>
+              <span className="text-[13px] text-muted">{sizeLine(t.layout, t.groups)}</span>
+              <span className="text-[13px] text-muted">{used(t)}</span>
+              <span className="flex items-center justify-end gap-1.5">
+                <Button size="sm" onClick={() => navigate(`/projects/templates/${t.id}`)}>
+                  Edit
+                </Button>
+                <Button size="sm" onClick={() => setUsing(t.id)}>
+                  Use
+                </Button>
+                <MoreMenu>
+                  {(close) => (
+                    <MenuItem
+                      danger
+                      onClick={() => {
+                        close()
+                        setDeleting(t)
+                      }}
+                    >
+                      Delete template…
+                    </MenuItem>
+                  )}
+                </MoreMenu>
+              </span>
+            </div>
+          ))}
+          {yours.length === 0 && <p className="px-[18px] py-4 text-[13px] text-muted">{q ? 'None of yours match.' : 'None yet. Customize a starter below, or open any project and choose … › Save as template.'}</p>}
+        </Card>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <h2 className="px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
+          Starters · {starts.length} <span className="font-medium tracking-normal normal-case">· ready-made, customize to make them yours</span>
+        </h2>
+        <Card>
+          {starts.map((s) => (
+            <div key={s.id} className={`${grid} min-h-[58px] border-divider px-[18px] py-2 [&+&]:border-t`}>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-sm font-medium">{s.name}</span>
+                <span className="truncate text-xs text-muted">{s.description}</span>
+              </span>
+              <span className="text-[13px] text-muted">{layoutInfo[s.layout].label}</span>
+              <span className="text-[13px] text-muted">{sizeLine(s.layout, s.groups)}</span>
+              <span className="text-[13px] text-faint">–</span>
+              <span className="flex items-center justify-end gap-1.5">
+                <Button size="sm" onClick={() => customize(s.key)}>
+                  Customize
+                </Button>
+                <Button size="sm" onClick={() => setUsing(s.id)}>
+                  Use
+                </Button>
+                <MoreMenu>
+                  {(close) => (
+                    <MenuItem
+                      onClick={() => {
+                        close()
+                        customize(s.key)
+                      }}
+                    >
+                      Make my own copy
+                    </MenuItem>
+                  )}
+                </MoreMenu>
+              </span>
+            </div>
+          ))}
+        </Card>
+      </div>
+
+      <p className="px-1 text-[13px] text-muted">Tip: any project can become a template. Open it, then choose … › Save as template.</p>
+
+      <TemplateUseModal open={!!using} initialId={using ?? undefined} onClose={() => setUsing(null)} />
+      <Modal
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={`Delete ${deleting?.name || 'this template'}?`}
+        footer={
+          <>
+            <span className="text-xs text-faint">Projects made from it stay as they are</span>
+            <div className="flex gap-2">
+              <Button onClick={() => setDeleting(null)}>Keep it</Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (deleting) deleteTemplate(deleting.id)
+                  setDeleting(null)
+                }}
+              >
+                Delete
+              </Button>
+            </div>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">The template goes away. Any project you already started from it keeps all its tasks.</p>
+      </Modal>
+    </div>
+  )
+}
+
+/* Template editor: the project page in template mode. Dates are Day 1, Week 2, and so on. */
+
+export function TemplateEditor() {
+  const { id } = useParams()
+  const { templates, loading } = useProjects()
+  const t = templates.find((x) => x.id === id)
+  if (loading) return null
+  if (!t) {
+    return (
+      <div className="flex flex-col gap-3">
+        <Link to="/projects/templates" className="text-[13px] text-muted hover:text-ink">
+          ‹ Templates
+        </Link>
+        <p className="text-sm text-muted">This template isn’t here anymore.</p>
+      </div>
+    )
+  }
+  return <Editor key={t.id} t={t} />
+}
+
+function Editor({ t }: { t: Template }) {
+  const { updateTemplate, deleteTemplate, addTemplate } = useProjects()
+  const navigate = useNavigate()
+  const [using, setUsing] = useState(false)
+  const [description, setDescription] = useState(t.description)
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(t.groups.map((g) => g.id)))
+  const save = (changes: Partial<Template>) => updateTemplate(t.id, changes)
+  const setGroups = (groups: PlanGroup[]) => save({ groups })
+  const setGroup = (gid: string, changes: Partial<PlanGroup>) => setGroups(t.groups.map((g) => (g.id === gid ? { ...g, ...changes } : g)))
+  const isList = t.layout === 'list'
+
+  const switchLayout = (layout: Layout) => {
+    if (layout === t.layout) return
+    // A task list is one group. Going to phases or milestones starts from that one group.
+    const groups =
+      layout === 'list'
+        ? [{ id: newId(), name: '', offset: 0, in_order: t.groups.some((g) => g.in_order), items: t.groups.flatMap((g) => g.items) }]
+        : isList
+          ? t.groups.map((g) => ({ ...g, name: layout === 'phases' ? 'Phase 1' : 'Milestone 1' }))
+          : t.groups
+    setOpenIds(new Set(groups.map((g) => g.id)))
+    save({ layout, groups })
+  }
+  const addGroup = () => {
+    const g: PlanGroup = { id: newId(), name: t.layout === 'phases' ? `Phase ${t.groups.length + 1}` : 'New milestone', offset: t.groups.at(-1)?.offset ?? 0, in_order: false, items: [] }
+    setOpenIds(new Set([...openIds, g.id]))
+    setGroups([...t.groups, g])
+  }
+  const flip = (gid: string) => {
+    const next = new Set(openIds)
+    if (!next.delete(gid)) next.add(gid)
+    setOpenIds(next)
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2">
+        <Link to="/projects/templates" className="w-fit text-[13px] text-muted hover:text-ink">
+          ‹ Templates
+        </Link>
+        <div className="flex items-center gap-3">
+          <InlineText label="Template name" value={t.name} placeholder="Template name" onSave={(name) => name && save({ name })} className="-ml-1.5 min-w-0 text-2xl font-semibold tracking-tight" autoSize />
+          <span className="rounded-full bg-[#F0F0EE] px-2.5 py-0.5 text-xs font-medium text-[#666666]">Template</span>
+          <span className="text-xs text-faint">Saved automatically</span>
+          <div className="flex-1" />
+          <MoreMenu>
+            {(close) => (
+              <div className="w-48">
+                <MenuItem
+                  onClick={async () => {
+                    close()
+                    const copy = await addTemplate({ name: `${t.name} (copy)`, description: t.description, layout: t.layout, count_from: t.count_from, groups: t.groups })
+                    if (copy) navigate(`/projects/templates/${copy.id}`)
+                  }}
+                >
+                  Duplicate
+                </MenuItem>
+                <MenuItem
+                  danger
+                  onClick={async () => {
+                    close()
+                    navigate('/projects/templates')
+                    await deleteTemplate(t.id)
+                  }}
+                >
+                  Delete template
+                </MenuItem>
+              </div>
+            )}
+          </MoreMenu>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)_320px] items-start gap-6">
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-muted">Dates count from</span>
+            <Dropdown
+              label="Dates count from"
+              value={t.count_from}
+              options={[
+                { value: 'start', label: 'the start date' },
+                { value: 'launch', label: 'launch or event day' },
+              ]}
+              onChange={(count_from) => save({ count_from })}
+            />
+            <div className="flex-1" />
+            <Popover
+              align="end"
+              trigger={({ toggle }) => (
+                <button type="button" onClick={toggle} className="h-[34px] rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] font-semibold hover:bg-divider">
+                  <span className="font-normal text-muted">Layout:</span> {layoutInfo[t.layout].label} ▾
+                </button>
+              )}
+            >
+              {(close) => (
+                <div className="w-64">
+                  {(Object.keys(layoutInfo) as Layout[]).map((l) => (
+                    <MenuItem
+                      key={l}
+                      selected={l === t.layout}
+                      onClick={() => {
+                        close()
+                        switchLayout(l)
+                      }}
+                    >
+                      {layoutInfo[l].label}
+                    </MenuItem>
+                  ))}
+                </div>
+              )}
+            </Popover>
+          </div>
+
+          {t.groups.map((g, gi) => {
+            const open = isList || openIds.has(g.id)
+            return (
+              <Card key={g.id}>
+                {isList ? (
+                  <div className="flex items-center justify-end gap-3 px-4 pt-2">
+                    <span className="text-[13px] text-muted">Do in order</span>
+                    <Switch label="Do in order" checked={g.in_order} onChange={(in_order) => setGroup(g.id, { in_order })} />
+                  </div>
+                ) : (
+                  <div className="flex min-h-[54px] items-center gap-2 border-divider py-1.5 pr-2 pl-3">
+                    <button type="button" aria-expanded={open} onClick={() => flip(g.id)} className="size-7 rounded-md text-muted hover:bg-divider">
+                      {open ? '⌄' : '›'}
+                    </button>
+                    {t.layout === 'phases' && <span className="text-sm font-semibold text-muted">{gi + 1}.</span>}
+                    <InlineText label="Name" value={g.name} placeholder="Name it" autoSize onSave={(name) => name && setGroup(g.id, { name })} className="-ml-1 text-sm font-semibold" />
+                    {t.layout === 'milestones' ? (
+                      <WhenControl offset={g.offset} countFrom={t.count_from} onChange={(offset) => setGroup(g.id, { offset })} />
+                    ) : (
+                      <span className="text-xs text-muted">{t.count_from === 'start' ? weekRange(g.items) : ''}</span>
+                    )}
+                    {g.in_order && <span className="text-xs text-muted">· In order</span>}
+                    <div className="flex-1" />
+                    <span className="text-xs text-faint">
+                      {g.items.length} {g.items.length === 1 ? 'task' : 'tasks'}
+                    </span>
+                    <MoreMenu>
+                      {(close) => (
+                        <div className="flex w-64 flex-col">
+                          <label className="flex cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2 hover:bg-divider">
+                            <span className="flex flex-1 flex-col gap-0.5">
+                              <span className="text-[13px] font-medium">Do in order</span>
+                              <span className="text-xs text-muted">Each task waits for the one above it. Drag to change the order.</span>
+                            </span>
+                            <Switch label="Do in order" checked={g.in_order} onChange={(in_order) => setGroup(g.id, { in_order })} />
+                          </label>
+                          {t.groups.length > 1 && (
+                            <MenuItem
+                              danger
+                              onClick={() => {
+                                close()
+                                setGroups(t.groups.filter((x) => x.id !== g.id))
+                              }}
+                            >
+                              Delete {t.layout === 'phases' ? 'phase' : 'milestone'} and its tasks
+                            </MenuItem>
+                          )}
+                        </div>
+                      )}
+                    </MoreMenu>
+                  </div>
+                )}
+                {open && (
+                  <div className={isList ? '' : 'border-t border-divider'}>
+                    <PlanRows key={`${g.id}-${t.count_from}`} items={g.items} countFrom={t.count_from} inOrder={g.in_order} onChange={(items) => setGroup(g.id, { items })} addLabel={isList ? 'Add task' : `Add task to ${g.name || 'this group'}`} />
+                  </div>
+                )}
+              </Card>
+            )
+          })}
+          {!isList && (
+            <button type="button" onClick={addGroup} className="h-11 rounded-2xl border-[1.5px] border-dashed border-field text-[13px] font-medium text-muted hover:border-solid hover:bg-surface">
+              + Add a {t.layout === 'phases' ? 'phase' : 'milestone'}
+            </button>
+          )}
+        </div>
+
+        <Card className="flex flex-col gap-6 p-5">
+          <p className="rounded-xl bg-canvas px-3.5 py-3 text-[13px] leading-relaxed text-muted">
+            This is a template, so dates are written as {t.count_from === 'start' ? 'Day 1, Week 2,' : `${whenLabel(-7, 'launch')}, Launch day,`} and so on. They turn into real dates when you start a project from it.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold">About</span>
+            <textarea
+              aria-label="Description"
+              rows={3}
+              placeholder="Description, like Discovery to launch for client sites"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => description !== t.description && save({ description })}
+              className="w-full resize-y rounded-xl border-[1.5px] border-field p-2.5 text-[13px] leading-relaxed placeholder:text-faint focus:outline-none"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold">Fill in when used</span>
+            <div className="flex justify-between text-[13px]">
+              <span className="text-muted">Client</span>
+              <span>Asked each time</span>
+            </div>
+            <div className="flex justify-between text-[13px]">
+              <span className="text-muted">{t.count_from === 'start' ? 'Start date' : 'Launch or event day'}</span>
+              <span>Asked each time</span>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold">Comes with</span>
+            <span className="text-xs text-faint">Docs and automations can come along once those areas are built.</span>
+          </div>
+          <Button variant="primary" onClick={() => setUsing(true)} disabled={planCount(t.groups) === 0}>
+            Use this template
+          </Button>
+        </Card>
+      </div>
+      <TemplateUseModal open={using} initialId={t.id} onClose={() => setUsing(false)} />
+    </div>
+  )
+}

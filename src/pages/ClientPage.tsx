@@ -4,7 +4,9 @@ import { Avatar, ConnectionChip, PhotoPicker, ConnectPicker, CopyButton, FieldMo
 import { DatePicker, Floating } from '../components/pickers'
 import PersonModal, { ClientTaskRow, NoteRow, waitingSince } from '../components/PersonModal'
 import TaskModal from '../components/TaskModal'
-import { StatusEditor, StatusPicker } from '../components/taskParts'
+import { StatusEditor, StatusPicker, StatusPill } from '../components/taskParts'
+import { ProgressBar, TemplateUseModal } from '../components/projectParts'
+import { layoutInfo, useProjects } from '../lib/projects'
 import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu } from '../components/ui'
 import { firstName, useClientInfo } from '../lib/clientInfo'
 import { formatPhone, noteKindLabel, noteKinds, useClients, type Client, type Field, type NoteKind } from '../lib/clients'
@@ -115,6 +117,7 @@ function Page({ client }: { client: Client }) {
         <div className="flex min-w-0 flex-col gap-6">
           <TopBoxes client={client} onOpenTask={openTask} />
           <OpenTasks client={client} onOpen={openTask} />
+          <ClientProjects client={client} />
           <NotesSection client={client} onOpenTask={openTask} />
         </div>
         <Card className="flex flex-col gap-6 p-5">
@@ -312,6 +315,55 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
           <TaskLinker exclude={all.map((t) => t.id)} onPick={(id) => connect({ type: 'task', id }, { type: 'client', id: client.id })} />
         </div>
       </Card>
+    </div>
+  )
+}
+
+/* Projects for this client: name, dates, layout, progress, status. */
+
+function ClientProjects({ client }: { client: Client }) {
+  const { projects, statusById, progress, addProject, today } = useProjects()
+  const { workspace } = useWorkspace()
+  const navigate = useNavigate()
+  const [fromTemplate, setFromTemplate] = useState(false)
+  if (workspace?.areas_on.projects === false) return null
+  const mine = projects.filter((p) => p.client_id === client.id).sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'))
+  const add = async () => {
+    const p = await addProject({ name: '', kind: 'client', client_id: client.id })
+    if (p) navigate(`/projects/${p.id}?new=1`)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 px-1">
+        <span className={sectionTitle}>Projects</span>
+        <span className="text-[13px] text-faint">{mine.length}</span>
+        <div className="flex-1" />
+        <button type="button" onClick={() => setFromTemplate(true)} className="text-[13px] font-medium text-muted hover:text-ink">
+          From a template…
+        </button>
+      </div>
+      <Card>
+        {mine.map((p) => {
+          const status = statusById(p.status_id)
+          const prog = progress(p.id)
+          return (
+            <button key={p.id} type="button" onClick={() => navigate(`/projects/${p.id}`)} className="flex min-h-[52px] w-full items-center gap-4 border-divider px-[18px] py-2 text-left hover:bg-[#FAFAFB] [&+&]:border-t">
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium">{p.name || 'Untitled project'}</span>
+                <span className="truncate text-xs text-muted">
+                  {[layoutInfo[p.layout].label, [p.start_date, p.due_date].filter(Boolean).map((d) => shortDate(d!, today)).join(' to ')].filter(Boolean).join(' · ')}
+                </span>
+              </span>
+              <ProgressBar done={prog.done} total={prog.total} />
+              <span className="flex w-24 justify-end">{status && <StatusPill status={status} />}</span>
+            </button>
+          )
+        })}
+        <button type="button" onClick={add} className="flex h-11 w-full items-center border-divider px-[18px] text-left text-[13px] font-medium text-muted hover:text-ink [&:not(:first-child)]:border-t">
+          + New project for {client.name || 'this client'}
+        </button>
+      </Card>
+      <TemplateUseModal open={fromTemplate} onClose={() => setFromTemplate(false)} clientId={client.id} />
     </div>
   )
 }

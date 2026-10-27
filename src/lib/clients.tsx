@@ -68,7 +68,7 @@ export type Field = {
 
 export type FieldValue = { id: string; field_id: string; item_type: string; item_id: string; value: unknown }
 
-export type ItemType = 'task' | 'client' | 'person' | 'note'
+export type ItemType = 'task' | 'client' | 'person' | 'note' | 'project'
 export type Connection = { id: string; from_type: ItemType; from_id: string; to_type: ItemType; to_id: string; created_at: string }
 
 export type FileLink = { id: string; item_type: string; item_id: string; name: string; url: string; kind: 'file' | 'link'; created_at: string }

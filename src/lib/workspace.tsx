@@ -21,6 +21,8 @@ export type Workspace = {
   afternoon_ends: string
   default_due: 'none' | 'today'
   repeat_from: 'due' | 'done'
+  project_layout: 'phases' | 'list' | 'milestones'
+  phases_in_order: boolean
 }
 
 export type Profile = {
