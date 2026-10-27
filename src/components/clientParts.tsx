@@ -15,13 +15,14 @@ import { Button, Dropdown, MenuItem, Modal, Pill, Popover } from './ui'
 export function Avatar({ name, business, size = 36, photo }: { name: string; business?: boolean; size?: number; photo?: string | null }) {
   if (photo) {
     // Logos sit whole on white with a little room. Faces fill the circle.
+    // The room is in pixels: a % padding counts from the row's width, which blew logos up in wide lists.
     return (
       <img
         src={photo}
         alt=""
         aria-hidden="true"
-        className={`shrink-0 ${business ? 'rounded-[28%] border border-border bg-white object-contain p-[8%]' : 'rounded-full object-cover'}`}
-        style={{ width: size, height: size, imageRendering: 'auto' }}
+        className={`shrink-0 ${business ? 'rounded-[28%] border border-border bg-white object-contain' : 'rounded-full object-cover'}`}
+        style={{ width: size, height: size, padding: business ? Math.max(2, Math.round(size * 0.08)) : 0, imageRendering: 'auto' }}
       />
     )
   }
