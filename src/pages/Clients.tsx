@@ -148,6 +148,23 @@ function ListView({ onNew }: { onNew: () => void }) {
   const main = list.filter((c) => !exitStages.some((s) => s.id === c.stage_status_id))
   const showStage = group === 'none'
   const grid = showStage ? colsWithStage : cols
+  // Drag a row onto another stage's group to move it there.
+  const [dragging, setDragging] = useState(false)
+  const [overId, setOverId] = useState<string | null>(null)
+  const dropOn = (stageId: string) => ({
+    onDragOver: (e: DragEvent) => {
+      e.preventDefault()
+      setOverId(stageId)
+    },
+    onDragLeave: () => setOverId(null),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault()
+      setOverId(null)
+      setDragging(false)
+      const client = api.clients.find((c) => c.id === e.dataTransfer.getData('text/plain'))
+      if (client) api.setStage(client, stageId)
+    },
+  })
 
   return (
     <div className="flex flex-col gap-4">
@@ -197,38 +214,43 @@ function ListView({ onNew }: { onNew: () => void }) {
               .filter((s) => s.behavior !== 'canceled')
               .map((s) => {
                 const inStage = main.filter((c) => c.stage_status_id === s.id)
-                if (!inStage.length) return null
+                if (!inStage.length && !dragging) return null
                 return (
-                  <div key={s.id} className="flex flex-col gap-1.5">
+                  <div key={s.id} {...dropOn(s.id)} className={`flex flex-col gap-1.5 rounded-2xl ${overId === s.id ? 'bg-[#EDEDF0]' : ''}`}>
                     <div className="flex items-center gap-2 px-1">
                       <h2 className="text-[13px] font-semibold">{s.name}</h2>
                       <span className="text-[13px] text-faint">{inStage.length}</span>
-                      <div className="flex-1" />
                       <StageMenu stage={s} api={api} />
                     </div>
-                    <Card>
-                      {inStage.map((c) => (
-                        <ClientRow key={c.id} client={c} grid={grid} />
-                      ))}
-                    </Card>
+                    {inStage.length ? (
+                      <Card>
+                        {inStage.map((c) => (
+                          <ClientRow key={c.id} client={c} grid={grid} onDrag={setDragging} />
+                        ))}
+                      </Card>
+                    ) : (
+                      <div className="flex h-12 items-center justify-center rounded-2xl border-[1.5px] border-dashed border-field text-[13px] text-muted">Drop here to move to {s.name}</div>
+                    )}
                   </div>
                 )
               })
           ) : (
             <Card>
               {main.map((c) => (
-                <ClientRow key={c.id} client={c} grid={grid} showStage />
+                <ClientRow key={c.id} client={c} grid={grid} showStage onDrag={setDragging} />
               ))}
             </Card>
           )}
-          {tab !== 'past' && exited.length > 0 && (
-            <Card>
+          {tab !== 'past' && (exited.length > 0 || dragging) && exitStages[0] && (
+            <Card className={overId === exitStages[0].id ? 'outline-2 outline-field' : ''}>
+              <div {...dropOn(exitStages[0].id)}>
               <button type="button" aria-expanded={showExit} onClick={() => setShowExit(!showExit)} className="flex h-11 w-full items-center gap-2 px-[18px] text-left text-sm font-semibold text-muted hover:text-ink">
                 <span className="w-3 text-faint">{showExit ? '⌄' : '›'}</span>
                 {exitStages.map((s) => s.name).join(', ')}
                 <span className="font-normal text-faint">{exited.length}</span>
               </button>
-              {showExit && exited.map((c) => <ClientRow key={c.id} client={c} grid={grid} showStage={showStage} />)}
+              {showExit && exited.map((c) => <ClientRow key={c.id} client={c} grid={grid} showStage={showStage} onDrag={setDragging} />)}
+              </div>
             </Card>
           )}
         </>
@@ -237,7 +259,7 @@ function ListView({ onNew }: { onNew: () => void }) {
   )
 }
 
-function ClientRow({ client, grid, showStage }: { client: Client; grid: string; showStage?: boolean }) {
+function ClientRow({ client, grid, showStage, onDrag }: { client: Client; grid: string; showStage?: boolean; onDrag?: (on: boolean) => void }) {
   const navigate = useNavigate()
   const { stageById, today } = useClients()
   const { nextUp, waitingOn, lastContact, subline } = useClientInfo()
@@ -248,13 +270,19 @@ function ClientRow({ client, grid, showStage }: { client: Client; grid: string; 
   return (
     <div
       role="link"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', client.id)
+        setTimeout(() => onDrag?.(true))
+      }}
+      onDragEnd={() => onDrag?.(false)}
       tabIndex={0}
       onClick={() => navigate(`/clients/${client.id}`)}
       onKeyDown={(e) => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
       className={`${grid} min-h-[60px] cursor-pointer border-divider px-[18px] py-2 hover:bg-[#FAFAFB] focus-visible:bg-[#FAFAFB] focus-visible:outline-none [&+&]:border-t`}
     >
       <span className="flex min-w-0 items-center gap-3">
-        <Avatar name={client.name} business={client.kind === 'business'} />
+        <Avatar name={client.name} business={client.kind === 'business'} photo={client.photo_url} />
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold">{client.name || 'Untitled'}</span>
           {sub && <span className="truncate text-xs text-muted">{sub}</span>}
@@ -264,7 +292,8 @@ function ClientRow({ client, grid, showStage }: { client: Client; grid: string; 
       <span className="truncate text-[13px]">
         {waiting ? (
           <span className="font-medium text-waiting">
-            {waiting.who} · {waiting.task.title}
+            {waiting.who ? `${waiting.who} · ` : ''}
+            {waiting.task.title}
           </span>
         ) : (
           <span className="text-faint">–</span>
@@ -297,7 +326,7 @@ function BoardCard({ client }: { client: Client }) {
       className="flex cursor-grab flex-col gap-2 rounded-xl border border-border bg-surface p-3 shadow-card transition-shadow hover:border-[#DCDCE0] hover:shadow-[0_4px_14px_rgba(20,20,30,0.1)] active:cursor-grabbing"
     >
       <div className="flex items-center gap-2.5">
-        <Avatar name={client.name} business={client.kind === 'business'} size={32} />
+        <Avatar name={client.name} business={client.kind === 'business'} size={32} photo={client.photo_url} />
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold">{client.name || 'Untitled'}</span>
           {sub && <span className="truncate text-xs text-muted">{sub}</span>}
@@ -311,7 +340,8 @@ function BoardCard({ client }: { client: Client }) {
       )}
       {waiting && (
         <span className="truncate text-[13px] font-medium text-waiting">
-          Waiting on · {waiting.who} · {waiting.task.title}
+          Waiting on · {waiting.who ? `${waiting.who} · ` : ''}
+          {waiting.task.title}
         </span>
       )}
       {last && (
@@ -363,7 +393,6 @@ function BoardView({ onNew }: { onNew: (stageId: string) => void }) {
               <div className="flex items-center gap-2 px-1">
                 <StatusPill status={s} />
                 <span className="text-[13px] text-faint">{inStage.length}</span>
-                <div className="flex-1" />
                 <StageMenu stage={s} api={api} sideways />
               </div>
               {inStage.map((c) => (
@@ -399,12 +428,7 @@ function BoardView({ onNew }: { onNew: (stageId: string) => void }) {
                       </span>
                     )}
                   </button>
-                  {expanded && (
-                    <>
-                      <div className="flex-1" />
-                      <StageMenu stage={s} api={api} sideways />
-                    </>
-                  )}
+                  {expanded && <StageMenu stage={s} api={api} sideways />}
                 </div>
                 {expanded && inStage.map((c) => <BoardCard key={c.id} client={c} />)}
               </div>

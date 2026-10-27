@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useClients } from '../lib/clients'
-import { formatDate } from '../lib/dates'
+import { noteKindLabel, useClients } from '../lib/clients'
+import { formatDate, shortDate } from '../lib/dates'
 import { priorityStyles, useTasks, type Priority, type Task } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
 import { Avatar, ConnectionChip, ConnectPicker, useClientSearch } from './clientParts'
@@ -120,41 +120,40 @@ function Inner(p: InnerProps) {
                       Cancel task
                     </MenuItem>
                   )}
-                  <MenuItem
-                    danger
-                    onClick={() => {
-                      closeMenu()
-                      p.setConfirmDelete(true)
-                    }}
-                  >
-                    Delete
-                  </MenuItem>
                 </div>
               )}
             </MoreMenu>
         }
         footer={
           <>
-            {done ? (
-              <Button
-                onClick={() => {
-                  if (firstOpenStatus) setStatus(task, firstOpenStatus.id)
-                }}
+            <div className="flex items-center gap-2">
+              {done ? (
+                <Button
+                  onClick={() => {
+                    if (firstOpenStatus) setStatus(task, firstOpenStatus.id)
+                  }}
+                >
+                  Mark not done
+                </Button>
+              ) : (
+                <Button
+                  disabled={!doneStatus}
+                  onClick={() => {
+                    flush()
+                    if (doneStatus) setStatus(task, doneStatus.id)
+                  }}
+                >
+                  ✓ Mark done
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={() => p.setConfirmDelete(true)}
+                className="h-9 rounded-[10px] px-3 text-sm font-medium text-[#A4574E] hover:bg-[#F8ECEA]"
               >
-                Mark not done
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                disabled={!doneStatus}
-                onClick={() => {
-                  flush()
-                  if (doneStatus) setStatus(task, doneStatus.id)
-                }}
-              >
-                Mark done
-              </Button>
-            )}
+                Delete
+              </button>
+            </div>
             <span className="text-xs text-faint">Saved automatically</span>
           </>
         }
@@ -339,7 +338,7 @@ function Inner(p: InnerProps) {
   )
 }
 
-/* Waiting on: type a name, or @, to pick a real client or person. Anything else stays as plain words. */
+/* Waiting on: plain words, with @ to tag a real client or person anywhere in the sentence ("the signed contract from @Dana"). */
 
 function WaitingOn({ task, text, setText, onBlur }: { task: Task; text: string; setText: (v: string) => void; onBlur: () => void }) {
   const { updateTask } = useTasks()
@@ -347,54 +346,76 @@ function WaitingOn({ task, text, setText, onBlur }: { task: Task; text: string; 
   const search = useClientSearch()
   const navigate = useNavigate()
   const anchor = useRef<HTMLInputElement>(null)
-  const [focused, setFocused] = useState(false)
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const person = people.find((p) => p.id === task.waiting_on_person_id)
   const client = clients.find((c) => c.id === (person?.client_id ?? task.waiting_on_client_id))
-  const query = text.replace(/^@/, '')
-  const results = focused && (text.startsWith('@') || query.trim().length >= 2) ? search(query) : []
+  const tagged = person?.name ?? client?.name ?? ''
+  const results = mention ? search(mention.query) : []
 
-  if (client) {
-    return (
-      <div className="flex flex-1 flex-wrap items-center gap-2">
-        <ConnectionChip
-          name={person ? `${person.name} · ${client.name}` : client.name}
-          business={!person && client.kind === 'business'}
-          onOpen={() => navigate(`/clients/${client.id}${person ? `?person=${person.id}` : ''}`)}
-          onRemove={() => updateTask(task.id, { waiting_on_person_id: null, waiting_on_client_id: null })}
-        />
-      </div>
-    )
+  // Looks back from the cursor for an "@" that starts a tag (up to three words).
+  const findMention = (value: string, cursor: number) => {
+    const m = /(^|\s)@([^@\n]{0,40})$/.exec(value.slice(0, cursor))
+    if (!m || m[2].split(' ').length > 3) return null
+    return { start: cursor - m[2].length - 1, query: m[2] }
+  }
+
+  const pick = (r: ReturnType<typeof search>[number]) => {
+    if (!mention) return
+    const before = text.slice(0, mention.start)
+    const after = text.slice(mention.start + 1 + mention.query.length)
+    const next = `${before}@${r.name} ${after.replace(/^\s+/, '')}`
+    setText(next)
+    setMention(null)
+    updateTask(task.id, { waiting_on_text: next, ...(r.type === 'person' ? { waiting_on_person_id: r.id, waiting_on_client_id: null } : { waiting_on_client_id: r.id, waiting_on_person_id: null }) })
+    requestAnimationFrame(() => anchor.current?.focus())
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-1">
+    <div className="flex flex-1 flex-col gap-1.5">
       <input
         ref={anchor}
         aria-label="Waiting on"
-        placeholder="A person or a thing. Type @ to pick a client."
+        placeholder="A person or a thing. Type @ to tag a client."
         value={text}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={onBlur}
-        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        onChange={(e) => {
+          setText(e.target.value)
+          setMention(findMention(e.target.value, e.target.selectionStart ?? e.target.value.length))
+        }}
+        onBlur={() => {
+          setTimeout(() => setMention(null), 150)
+          onBlur()
+          // Deleting a tag's name from the words un-tags it.
+          if (tagged && text && !text.includes(`@${tagged}`)) updateTask(task.id, { waiting_on_person_id: null, waiting_on_client_id: null })
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && results[0]) {
+            e.preventDefault()
+            pick(results[0])
+          } else if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape' && mention) {
+            e.stopPropagation()
+            setMention(null)
+          }
+        }}
         className={`${inputCls} w-full`}
       />
+      {client && (
+        <span className="flex items-center gap-1.5 text-xs text-muted">
+          Tagged:
+          <button type="button" onClick={() => navigate(`/clients/${client.id}${person ? `?person=${person.id}` : ''}`)} className="font-medium text-ink hover:underline">
+            {person ? `${person.name} · ${client.name}` : client.name}
+          </button>
+          <button type="button" aria-label="Remove tag" onClick={() => updateTask(task.id, { waiting_on_person_id: null, waiting_on_client_id: null })} className="rounded px-1 text-faint hover:bg-divider hover:text-ink">
+            ✕
+          </button>
+        </span>
+      )}
       {results.length > 0 && (
-        <Floating anchor={anchor} onClose={() => setFocused(false)} height={260} width={320}>
+        <Floating anchor={anchor} onClose={() => setMention(null)} height={260} width={320}>
           <div className="flex max-h-64 flex-col overflow-y-auto p-1.5">
             {results.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setText('')
-                  setFocused(false)
-                  updateTask(task.id, r.type === 'person' ? { waiting_on_person_id: r.id, waiting_on_client_id: null, waiting_on_text: '' } : { waiting_on_client_id: r.id, waiting_on_person_id: null, waiting_on_text: '' })
-                }}
-                className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-divider"
-              >
-                <Avatar name={r.name} business={r.business} size={26} />
+              <button key={r.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pick(r)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-divider">
+                <Avatar name={r.name} business={r.business} size={26} photo={r.photo} />
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-[13px] font-medium">{r.name}</span>
                   <span className="truncate text-xs text-muted">{r.sub}</span>
@@ -411,7 +432,7 @@ function WaitingOn({ task, text, setText, onBlur }: { task: Task; text: string; 
 /* Connected to: chips for the clients and people this task is about, and + Connect. */
 
 function Connected({ taskId }: { taskId: string }) {
-  const { connections, clients, people, connect, disconnect } = useClients()
+  const { connections, clients, people, notes, connect, disconnect, today: todayStr } = useClients()
   const navigate = useNavigate()
   const mine = connections.filter((c) => c.from_id === taskId || c.to_id === taskId)
   const ids = mine.map((c) => (c.from_id === taskId ? c.to_id : c.from_id))
@@ -421,6 +442,22 @@ function Connected({ taskId }: { taskId: string }) {
         const id = c.from_id === taskId ? c.to_id : c.from_id
         const client = clients.find((x) => x.id === id)
         const person = people.find((x) => x.id === id)
+        const note = notes.find((x) => x.id === id)
+        if (note) {
+          // An action item from a call or note links back to it.
+          const from = clients.find((x) => x.id === note.client_id)
+          return (
+            <span key={c.id} className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-surface pr-1 pl-3 text-[13px]">
+              <button type="button" onClick={() => from && navigate(`/clients/${from.id}`)} className="font-medium hover:underline">
+                From {noteKindLabel(note.kind).toLowerCase()} · {shortDate(note.occurred_at, todayStr)}
+                {from && <span className="font-normal text-muted"> with {from.name}</span>}
+              </button>
+              <button type="button" aria-label="Remove link" onClick={() => disconnect(c.id)} className="size-6 rounded-full text-xs text-faint hover:bg-divider hover:text-ink">
+                ✕
+              </button>
+            </span>
+          )
+        }
         const owner = person ? clients.find((x) => x.id === person.client_id) : client
         if (!owner) return null
         return (

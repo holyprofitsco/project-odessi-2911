@@ -69,6 +69,7 @@ export function DatePicker({
   label,
   placeholder = 'Add a date',
   clearable = true,
+  quiet,
 }: {
   value: string | null
   onChange: (next: string | null) => void
@@ -77,6 +78,8 @@ export function DatePicker({
   label: string
   placeholder?: string
   clearable?: boolean
+  // Plain text that only shows a box on hover, for quiet spots like "Client since".
+  quiet?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
@@ -116,9 +119,13 @@ export function DatePicker({
           setView((value ?? today).slice(0, 7))
           setOpen(!open)
         }}
-        className={`inline-flex h-9 items-center gap-2 px-3 hover:bg-divider ${fieldCls} ${value ? 'text-ink' : 'text-faint'}`}
+        className={
+          quiet
+            ? `inline-flex h-8 items-center rounded-md px-1.5 hover:bg-divider ${value ? '' : 'text-faint'}`
+            : `inline-flex h-9 items-center gap-2 px-3 hover:bg-divider ${fieldCls} ${value ? 'text-ink' : 'text-faint'}`
+        }
       >
-        <CalendarIcon />
+        {!quiet && <CalendarIcon />}
         {value ? formatDate(value, today) : placeholder}
       </button>
       {open && (

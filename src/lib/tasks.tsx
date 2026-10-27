@@ -79,10 +79,13 @@ type TasksState = {
   setStatus: (task: Task, statusId: string) => Promise<void>
   deleteTask: (id: string) => Promise<void>
   duplicateTask: (task: Task) => Promise<Task | null>
-  addStatus: () => Promise<void>
+  addStatus: (afterId?: string) => Promise<void>
   updateStatus: (id: string, changes: Partial<Status>) => Promise<void>
   moveStatus: (id: string, direction: -1 | 1) => Promise<void>
   deleteStatus: (id: string) => Promise<boolean>
+  countIn: (id: string) => number
+  moveAndDelete: (id: string, toId: string) => Promise<void>
+  noun: string
 }
 
 const TasksContext = createContext<TasksState | null>(null)
@@ -268,13 +271,14 @@ export function TasksProvider({ children }: { children: ReactNode }) {
 
   /* Statuses are data: add, rename, recolor, reorder and delete them right on the page. */
 
-  const addStatus = useCallback(async () => {
+  const addStatus = useCallback(async (afterId?: string) => {
     if (!workspaceId) return
     const openCount = sortedStatuses.filter((s) => s.behavior === 'open').length
     const palette = statusColors[(openCount + 4) % statusColors.length]
-    // New statuses slot in just before Waiting, so Waiting, Done and Canceled stay at the end.
+    // New statuses slot in after the one you picked, or just before Waiting, so Waiting, Done and Canceled stay at the end.
     const waiting = sortedStatuses.find((s) => s.behavior === 'waiting')
-    const at = waiting ? waiting.sort_order : sortedStatuses.length
+    const after = sortedStatuses.find((s) => s.id === afterId)
+    const at = after ? after.sort_order + 1 : waiting ? waiting.sort_order : sortedStatuses.length
     const shifted = sortedStatuses.filter((s) => s.sort_order >= at).map((s) => ({ ...s, sort_order: s.sort_order + 1 }))
     await Promise.all(shifted.map((s) => supabase.from('statuses').update({ sort_order: s.sort_order }).eq('id', s.id)))
     const { data } = await supabase
@@ -316,6 +320,15 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [tasks],
   )
 
+  const countIn = useCallback((id: string) => tasks.filter((t) => t.status_id === id).length, [tasks])
+
+  const moveAndDelete = useCallback(async (id: string, toId: string) => {
+    setTasks((list) => list.map((t) => (t.status_id === id ? { ...t, status_id: toId } : t)))
+    await supabase.from('tasks').update({ status_id: toId }).eq('status_id', id)
+    setStatuses((list) => list.filter((s) => s.id !== id))
+    await supabase.from('statuses').delete().eq('id', id)
+  }, [])
+
   const choose = async (pick: WeekendChoice) => {
     if (!pending) return
     const { task, nominal, holder } = pending
@@ -345,6 +358,9 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         updateStatus,
         moveStatus,
         deleteStatus,
+        countIn,
+        moveAndDelete,
+        noun: 'tasks',
       }}
     >
       {children}

@@ -6,13 +6,16 @@ import { statusColors, type Status } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
 import { GripIcon } from './icons'
 import { DatePicker, Floating } from './pickers'
-import { Button, Dropdown, MenuItem, Modal, MoreMenu, Pill, Popover } from './ui'
+import { Button, Dropdown, MenuItem, Modal, Pill, Popover } from './ui'
 
 // Small pieces shared by the Clients list, the board, the client page, and the person pop-up.
 
 /* Faces and logos: people are round, businesses are rounded squares. */
 
-export function Avatar({ name, business, size = 36 }: { name: string; business?: boolean; size?: number }) {
+export function Avatar({ name, business, size = 36, photo }: { name: string; business?: boolean; size?: number; photo?: string | null }) {
+  if (photo) {
+    return <img src={photo} alt="" aria-hidden="true" className={`shrink-0 object-cover ${business ? 'rounded-[28%] border border-border' : 'rounded-full'}`} style={{ width: size, height: size }} />
+  }
   return (
     <span
       aria-hidden="true"
@@ -21,6 +24,72 @@ export function Avatar({ name, business, size = 36 }: { name: string; business?:
     >
       {initials(name)}
     </span>
+  )
+}
+
+/* A face or logo you can change: click it to upload a picture. Initials are only the placeholder. */
+
+export function PhotoPicker({ name, business, photo, size, onChange }: { name: string; business?: boolean; photo: string | null; size: number; onChange: (url: string | null) => void }) {
+  const { uploadPhoto } = useClients()
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const pick = () => input.current?.click()
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (!file) return
+          setBusy(true)
+          const url = await uploadPhoto(file)
+          setBusy(false)
+          if (url) onChange(url)
+        }}
+      />
+      <Popover
+        trigger={({ toggle }) => (
+          <button
+            type="button"
+            onClick={photo ? toggle : pick}
+            title={photo ? 'Change picture' : business ? 'Add a logo' : 'Add a photo'}
+            aria-label={photo ? 'Change picture' : business ? 'Add a logo' : 'Add a photo'}
+            className={`group relative block ${busy ? 'opacity-50' : ''}`}
+          >
+            <Avatar name={name} business={business} size={size} photo={photo} />
+            <span className={`absolute inset-0 flex items-center justify-center bg-ink/45 text-[11px] font-semibold text-white opacity-0 group-hover:opacity-100 ${business ? 'rounded-[28%]' : 'rounded-full'}`}>
+              {photo ? 'Change' : business ? '+ Logo' : '+ Photo'}
+            </span>
+          </button>
+        )}
+      >
+        {(close) => (
+          <div className="w-44">
+            <MenuItem
+              onClick={() => {
+                close()
+                pick()
+              }}
+            >
+              Upload a new one
+            </MenuItem>
+            <MenuItem
+              danger
+              onClick={() => {
+                close()
+                onChange(null)
+              }}
+            >
+              Remove picture
+            </MenuItem>
+          </div>
+        )}
+      </Popover>
+    </>
   )
 }
 
@@ -194,10 +263,15 @@ export function SocialRow({ socials, onChange }: { socials: Social[]; onChange: 
   )
 }
 
-/* Stage menu: the "…" on every stage header. Rename, recolor, move, add one after, or delete (moving its clients first). */
+/* Stage menu: the "…" on every stage header, right after the count. Rename, recolor, move, add one after, or delete (moving its items first).
+   It floats above the page, so a board's scroll area never cuts it off. */
 
 export function StageMenu({ stage, api, sideways }: { stage: Status; api: StageApi; sideways?: boolean }) {
   const [deleting, setDeleting] = useState(false)
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLButtonElement>(null)
+  const close = () => setOpen(false)
+  const noun = api.noun ?? 'items'
   const i = api.statuses.findIndex((s) => s.id === stage.id)
   const others = api.statuses.filter((s) => s.id !== stage.id)
   const [moveTo, setMoveTo] = useState(others[0]?.id ?? '')
@@ -206,9 +280,20 @@ export function StageMenu({ stage, api, sideways }: { stage: Status; api: StageA
 
   return (
     <>
-      <MoreMenu>
-        {(close) => (
-          <div className="flex w-60 flex-col gap-1">
+      <button
+        ref={anchor}
+        type="button"
+        title="More"
+        aria-label={`More for ${stage.name}`}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex size-7 items-center justify-center rounded-lg text-lg leading-none text-muted hover:bg-divider hover:text-ink"
+      >
+        …
+      </button>
+      {open && (
+        <Floating anchor={anchor} onClose={close} height={330} width={248}>
+          <div className="flex flex-col gap-1 p-1">
             {label('Name')}
             <div className="px-1.5">
               <input
@@ -280,30 +365,33 @@ export function StageMenu({ stage, api, sideways }: { stage: Status; api: StageA
               </MenuItem>
             )}
           </div>
-        )}
-      </MoreMenu>
+        </Floating>
+      )}
       <Modal
         open={deleting}
         onClose={() => setDeleting(false)}
         title={`Delete “${stage.name}”?`}
         footer={
           <>
-            <Button onClick={() => setDeleting(false)}>Keep it</Button>
-            <Button
-              variant="danger"
-              onClick={async () => {
-                setDeleting(false)
-                if (moveTo) await api.moveAndDelete?.(stage.id, moveTo)
-              }}
-            >
-              Move and delete
-            </Button>
+            <span />
+            <div className="flex gap-2">
+              <Button onClick={() => setDeleting(false)}>Keep it</Button>
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  setDeleting(false)
+                  if (moveTo) await api.moveAndDelete?.(stage.id, moveTo)
+                }}
+              >
+                Move and delete
+              </Button>
+            </div>
           </>
         }
       >
         <div className="flex flex-col gap-3">
           <p className="text-sm text-muted">
-            {count} {count === 1 ? 'client is' : 'clients are'} in this stage. Where should {count === 1 ? 'they' : 'they all'} go?
+            {count} {count === 1 ? `${noun.replace(/s$/, '')} is` : `${noun} are`} in this stage. Where should {count === 1 ? (noun === 'tasks' ? 'it' : 'they') : 'they all'} go?
           </p>
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">Move to</span>
@@ -549,17 +637,30 @@ export function FieldModal({ open, onClose, field }: { open: boolean; onClose: (
       }
     >
       <div className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Field name</span>
-          <input
-            autoFocus
-            value={name}
-            placeholder="Like Offer, Birthday, or Budget"
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && step === 1 && type && !hasOptions(type) && done()}
-            className="h-10 rounded-lg border-[1.5px] border-field px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-          />
-        </label>
+        {field ? (
+          // Editing: the name reads as a title you can rename, so it doesn't look like the box for new choices.
+          <label className="flex items-center gap-2">
+            <span className="text-[13px] text-muted">Name</span>
+            <input
+              aria-label="Field name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="h-9 min-w-0 flex-1 rounded-lg border-[1.5px] border-transparent px-2 text-base font-semibold hover:border-field focus:border-field focus:outline-none"
+            />
+          </label>
+        ) : (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Field name</span>
+            <input
+              autoFocus
+              value={name}
+              placeholder="Like Offer, Birthday, or Budget"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && step === 1 && type && !hasOptions(type) && done()}
+              className="h-10 rounded-lg border-[1.5px] border-field px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            />
+          </label>
+        )}
 
         {step === 1 ? (
           <div className="flex flex-col gap-1.5">
@@ -651,6 +752,7 @@ export function FieldModal({ open, onClose, field }: { open: boolean; onClose: (
               ))}
               <input
                 aria-label="Add a choice"
+                autoFocus
                 placeholder={type === 'labels' ? 'Add a label, press Enter' : 'Add a choice, press Enter'}
                 value={newOption}
                 onChange={(e) => setNewOption(e.target.value)}
@@ -702,13 +804,13 @@ export function useClientSearch() {
   return (query: string, exclude: string[] = []) => {
     const q = query.trim().toLowerCase()
     const match = (s: string) => !q || s.toLowerCase().includes(q)
-    const items: { type: ItemType; id: string; name: string; sub: string; business: boolean; client: Client; person?: Person }[] = []
+    const items: { type: ItemType; id: string; name: string; sub: string; business: boolean; photo: string | null; client: Client; person?: Person }[] = []
     for (const c of clients) {
-      if (!exclude.includes(c.id) && match(c.name)) items.push({ type: 'client', id: c.id, name: c.name || 'Untitled', sub: c.kind === 'business' ? 'Business' : 'Client', business: c.kind === 'business', client: c })
+      if (!exclude.includes(c.id) && match(c.name)) items.push({ type: 'client', id: c.id, name: c.name || 'Untitled', sub: c.kind === 'business' ? 'Business' : 'Client', business: c.kind === 'business', photo: c.photo_url, client: c })
     }
     for (const p of people) {
       const c = clients.find((x) => x.id === p.client_id)
-      if (c && !exclude.includes(p.id) && match(p.name)) items.push({ type: 'person', id: p.id, name: p.name || 'Unnamed', sub: c.name, business: false, client: c, person: p })
+      if (c && !exclude.includes(p.id) && match(p.name)) items.push({ type: 'person', id: p.id, name: p.name || 'Unnamed', sub: c.name, business: false, photo: p.photo_url, client: c, person: p })
     }
     return items.sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q))).slice(0, 8)
   }
@@ -740,7 +842,7 @@ function ConnectList({ onPick, exclude }: { onPick: (item: { type: ItemType; id:
       <div className="flex max-h-56 flex-col overflow-y-auto">
         {results.map((r) => (
           <button key={r.id} type="button" onClick={() => onPick({ type: r.type, id: r.id })} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-divider">
-            <Avatar name={r.name} business={r.business} size={26} />
+            <Avatar name={r.name} business={r.business} size={26} photo={r.photo} />
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-[13px] font-medium">{r.name}</span>
               <span className="truncate text-xs text-muted">{r.sub}</span>

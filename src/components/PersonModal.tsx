@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { firstName, useClientInfo } from '../lib/clientInfo'
-import { noteKindLabel, useClients, type Note } from '../lib/clients'
+import { formatPhone, noteKindLabel, useClients, type Note } from '../lib/clients'
 import { diffDays, shortDate, weekdayNames, weekdayOf } from '../lib/dates'
 import { useTasks, type Task } from '../lib/tasks'
-import { Avatar, CopyButton, InlineText, SocialRow } from './clientParts'
+import { CopyButton, InlineText, PhotoPicker, SocialRow } from './clientParts'
 import { Checkbox, DueText } from './taskParts'
 import { Button, MenuItem, Modal, MoreMenu } from './ui'
 
@@ -16,7 +16,7 @@ export function waitingSince(t: Task, today: string) {
 
 /* A task line on a client page or in the person pop-up: checkbox, title, who, and when. */
 
-export function ClientTaskRow({ task, who, onOpen }: { task: Task; who?: string; onOpen: (id: string) => void }) {
+export function ClientTaskRow({ task, who, onOpen, compact }: { task: Task; who?: string; onOpen: (id: string) => void; compact?: boolean }) {
   const { statusById, setStatus, statuses, firstOpenStatus, today } = useTasks()
   const behavior = statusById(task.status_id)?.behavior
   const done = behavior === 'done'
@@ -30,12 +30,12 @@ export function ClientTaskRow({ task, who, onOpen }: { task: Task; who?: string;
       tabIndex={0}
       onClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className="flex min-h-[50px] cursor-pointer items-center gap-3 border-divider px-[18px] py-2 hover:bg-[#FAFAFB] [&+&]:border-t"
+      className={`flex cursor-pointer items-center gap-3 border-divider hover:bg-[#FAFAFB] [&+&]:border-t ${compact ? 'min-h-10 px-3.5 py-1.5' : 'min-h-[50px] px-[18px] py-2'}`}
     >
       <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={toggle} />
       <span className={`min-w-0 flex-1 truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
       {who !== undefined && <span className="w-28 shrink-0 truncate text-[13px] text-muted">{who}</span>}
-      <span className="flex w-36 shrink-0 justify-start">
+      <span className={`flex shrink-0 justify-start ${compact ? '' : 'w-36'}`}>
         {behavior === 'waiting' ? <span className="text-[13px] font-medium text-waiting">{waitingSince(task, today)}</span> : <DueText task={task} today={today} done={done} />}
       </span>
     </div>
@@ -44,9 +44,12 @@ export function ClientTaskRow({ task, who, onOpen }: { task: Task; who?: string;
 
 /* A note in the history: date and kind on the left, the words on the right. */
 
-export function NoteRow({ note, showPerson = true }: { note: Note; showPerson?: boolean }) {
-  const { people, updateNote, deleteNote, today } = useClients()
+export function NoteRow({ note, showPerson = true, onOpenTask }: { note: Note; showPerson?: boolean; onOpenTask?: (id: string) => void }) {
+  const { people, connections, connect, updateNote, deleteNote, today } = useClients()
+  const { tasks, addTask } = useTasks()
   const [editing, setEditing] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState('')
   const person = people.find((p) => p.id === note.person_id)
   if (note.kind === 'stage') {
     return (
@@ -59,6 +62,16 @@ export function NoteRow({ note, showPerson = true }: { note: Note; showPerson?: 
       </div>
     )
   }
+  const actionItems = tasks.filter((t) => connections.some((c) => c.from_id === t.id && c.to_id === note.id))
+  const addActionItem = async () => {
+    const title = draft.trim()
+    setDraft('')
+    if (!title) return setAdding(false)
+    const t = await addTask({ title })
+    if (!t) return
+    await connect({ type: 'task', id: t.id }, note.person_id ? { type: 'person', id: note.person_id } : { type: 'client', id: note.client_id })
+    await connect({ type: 'task', id: t.id }, { type: 'note', id: note.id })
+  }
   return (
     <div className="group flex items-start gap-4 border-divider px-[18px] py-3 [&+&]:border-t">
       <span className="flex w-24 shrink-0 flex-col">
@@ -68,26 +81,62 @@ export function NoteRow({ note, showPerson = true }: { note: Note; showPerson?: 
           {showPerson && person && ` · ${firstName(person.name)}`}
         </span>
       </span>
-      {editing ? (
-        <textarea
-          autoFocus
-          aria-label="Edit note"
-          defaultValue={note.body}
-          rows={3}
-          onBlur={(e) => {
-            setEditing(false)
-            if (e.target.value.trim() !== note.body) updateNote(note.id, { body: e.target.value.trim() })
-          }}
-          className="min-w-0 flex-1 resize-y rounded-lg border-[1.5px] border-field p-2 text-sm leading-relaxed focus:outline-none"
-        />
-      ) : (
-        <button type="button" onClick={() => setEditing(true)} title="Click to edit" className="min-w-0 flex-1 text-left text-sm leading-relaxed whitespace-pre-wrap">
-          {note.body || <span className="text-faint">No words yet</span>}
-        </button>
-      )}
-      <button type="button" aria-label="Delete note" onClick={() => deleteNote(note)} className="size-7 shrink-0 rounded-md text-xs text-faint opacity-0 group-hover:opacity-100 hover:text-ink">
-        ✕
-      </button>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex items-start gap-2">
+          {editing ? (
+            <textarea
+              autoFocus
+              aria-label="Edit note"
+              defaultValue={note.body}
+              rows={3}
+              onBlur={(e) => {
+                setEditing(false)
+                if (e.target.value.trim() !== note.body) updateNote(note.id, { body: e.target.value.trim() })
+              }}
+              className="min-w-0 flex-1 resize-y rounded-lg border-[1.5px] border-field p-2 text-sm leading-relaxed focus:outline-none"
+            />
+          ) : (
+            <button type="button" onClick={() => setEditing(true)} title="Click to edit" className="max-w-[640px] min-w-0 text-left text-sm leading-relaxed whitespace-pre-wrap">
+              {note.body || <span className="text-faint">No words yet</span>}
+            </button>
+          )}
+          {/* Actions sit right after the words, not at the far edge of a wide screen. */}
+          <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+            <button type="button" onClick={() => setAdding(true)} className="h-7 rounded-md px-1.5 text-xs font-medium text-muted hover:bg-divider hover:text-ink">
+              + Action item
+            </button>
+            <button type="button" aria-label="Delete note" title="Delete note" onClick={() => deleteNote(note)} className="size-7 rounded-md text-xs text-faint hover:bg-divider hover:text-ink">
+              ✕
+            </button>
+          </span>
+        </div>
+        {(actionItems.length > 0 || adding) && (
+          <div className="flex max-w-[640px] flex-col rounded-xl border border-border">
+            {actionItems.map((t) => (
+              <ClientTaskRow key={t.id} task={t} compact onOpen={(id) => onOpenTask?.(id)} />
+            ))}
+            {adding && (
+              <input
+                autoFocus
+                aria-label="New action item"
+                placeholder="Action item, press Enter"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={addActionItem}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addActionItem()
+                  if (e.key === 'Escape') {
+                    e.stopPropagation()
+                    setDraft('')
+                    setAdding(false)
+                  }
+                }}
+                className="h-10 border-divider bg-transparent px-3.5 text-[13px] placeholder:text-faint focus:outline-none [&:not(:first-child)]:border-t"
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -135,7 +184,7 @@ export default function PersonModal({ personId, onClose, onOpenTask }: { personI
       >
         <div className="flex flex-col gap-4">
           <div className="flex items-start gap-4">
-            <Avatar name={person.name} size={52} />
+            <PhotoPicker name={person.name} size={52} photo={person.photo_url} onChange={(photo_url) => updatePerson(person.id, { photo_url })} />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <InlineText label="Name" value={person.name} placeholder="Their name" autoFocus={!person.name} onSave={(name) => name && updatePerson(person.id, { name })} className="-ml-1.5 text-2xl font-semibold tracking-tight" />
               <InlineText label="Role" value={person.role} placeholder="Add a role, like Owner" onSave={(role) => updatePerson(person.id, { role })} className="-ml-1.5 text-sm text-muted" />
@@ -151,7 +200,7 @@ export default function PersonModal({ personId, onClose, onOpenTask }: { personI
             </div>
             <div className={row}>
               <span className="w-28 shrink-0 text-muted">Phone</span>
-              <InlineText label="Phone" value={person.phone} placeholder="Add a phone" onSave={(phone) => updatePerson(person.id, { phone })} className="flex-1" />
+              <InlineText label="Phone" value={person.phone} placeholder="Add a phone" onSave={(phone) => updatePerson(person.id, { phone: formatPhone(phone) })} className="flex-1" />
               <CopyButton text={person.phone} />
             </div>
             <div className={row}>
@@ -187,7 +236,7 @@ export default function PersonModal({ personId, onClose, onOpenTask }: { personI
             {theirNotes.length ? (
               <div className="rounded-xl border border-border">
                 {theirNotes.map((n) => (
-                  <NoteRow key={n.id} note={n} showPerson={false} />
+                  <NoteRow key={n.id} note={n} showPerson={false} onOpenTask={onOpenTask} />
                 ))}
               </div>
             ) : (

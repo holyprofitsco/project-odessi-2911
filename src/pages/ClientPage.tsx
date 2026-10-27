@@ -1,13 +1,13 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Avatar, ConnectionChip, ConnectPicker, CopyButton, FieldModal, FieldValueEditor, InlineText, LastContactText, SocialRow, withHttp } from '../components/clientParts'
-import { DatePicker } from '../components/pickers'
+import { Avatar, ConnectionChip, PhotoPicker, ConnectPicker, CopyButton, FieldModal, FieldValueEditor, InlineText, LastContactText, SocialRow, withHttp } from '../components/clientParts'
+import { DatePicker, Floating } from '../components/pickers'
 import PersonModal, { ClientTaskRow, NoteRow, waitingSince } from '../components/PersonModal'
 import TaskModal from '../components/TaskModal'
 import { StatusEditor, StatusPicker } from '../components/taskParts'
 import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu } from '../components/ui'
 import { firstName, useClientInfo } from '../lib/clientInfo'
-import { noteKindLabel, noteKinds, useClients, type Client, type Field, type NoteKind } from '../lib/clients'
+import { formatPhone, noteKindLabel, noteKinds, useClients, type Client, type Field, type NoteKind } from '../lib/clients'
 import { formatDate, formatTime, shortDate } from '../lib/dates'
 import { useTasks } from '../lib/tasks'
 import { timeZones, zoneLabel } from '../lib/timeZones'
@@ -60,7 +60,7 @@ function Page({ client }: { client: Client }) {
           ‹ Clients
         </Link>
         <div className="flex items-start gap-4">
-          <Avatar name={client.name} business={business} size={52} />
+          <PhotoPicker name={client.name} business={business} size={52} photo={client.photo_url} onChange={(photo_url) => updateClient(client.id, { photo_url })} />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <InlineText label="Client name" value={client.name} placeholder="Their name" onSave={(name) => name && updateClient(client.id, { name })} className="-ml-1.5 text-2xl font-semibold tracking-tight" />
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -73,10 +73,12 @@ function Page({ client }: { client: Client }) {
                 <InlineText label="Title" value={client.title} placeholder="Add a title, like Founder, Reyes Wellness" onSave={(title) => updateClient(client.id, { title })} autoSize />
               )}
               <span className="text-faint">·</span>
-              <span>Client since</span>
-              <DatePicker label="Client since" value={client.client_since} today={today} placeholder="Add a date" onChange={(client_since) => updateClient(client.id, { client_since })} />
+              <span className="flex items-center">
+                Client since
+                <DatePicker quiet label="Client since" value={client.client_since} today={today} placeholder="add a date" onChange={(client_since) => updateClient(client.id, { client_since })} />
+              </span>
             </div>
-            {!business && <SocialRow socials={client.socials} onChange={(socials) => updateClient(client.id, { socials })} />}
+            <SocialRow socials={client.socials} onChange={(socials) => updateClient(client.id, { socials })} />
           </div>
           <div className="flex items-center gap-1">
             <Button onClick={() => emailTo && (window.location.href = `mailto:${emailTo}`)} disabled={!emailTo} title={emailTo ? `Opens your email app to write to ${emailTo}` : 'Add an email first'}>
@@ -113,7 +115,7 @@ function Page({ client }: { client: Client }) {
         <div className="flex min-w-0 flex-col gap-6">
           <TopBoxes client={client} />
           <OpenTasks client={client} onOpen={openTask} />
-          <NotesSection client={client} />
+          <NotesSection client={client} onOpenTask={openTask} />
         </div>
         <Card className="flex flex-col gap-6 p-5">
           {business && <PeopleSection client={client} onOpen={openPerson} />}
@@ -191,7 +193,7 @@ function TopBoxes({ client }: { client: Client }) {
           <span className="text-[13px] text-faint">Nothing planned yet</span>
         )}
       </Box>
-      <Box label={waiting ? `Waiting on · ${waiting.who}` : 'Waiting on'} warm={!!waiting}>
+      <Box label={waiting?.who ? `Waiting on · ${waiting.who}` : 'Waiting on'} warm={!!waiting}>
         {waiting ? (
           <>
             <span className="truncate text-sm font-semibold">{waiting.task.title}</span>
@@ -269,15 +271,58 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
             onKeyDown={(e) => e.key === 'Enter' && add()}
             className="h-11 flex-1 bg-transparent text-[13px] font-medium placeholder:text-muted focus:outline-none"
           />
+          <TaskLinker exclude={all.map((t) => t.id)} onPick={(id) => connect({ type: 'task', id }, { type: 'client', id: client.id })} />
         </div>
       </Card>
     </div>
   )
 }
 
+/* Link a task that already exists: search your open tasks and tie one to this client. */
+
+function TaskLinker({ exclude, onPick }: { exclude: string[]; onPick: (id: string) => void }) {
+  const { tasks, statusById } = useTasks()
+  const anchor = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const found = tasks
+    .filter((t) => !t.parent_task_id && t.title && !exclude.includes(t.id) && ['open', 'waiting'].includes(statusById(t.status_id)?.behavior ?? '') && t.title.toLowerCase().includes(q))
+    .slice(0, 8)
+  return (
+    <>
+      <button ref={anchor} type="button" onClick={() => setOpen(!open)} className="h-8 shrink-0 rounded-lg px-2 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
+        Link a task
+      </button>
+      {open && (
+        <Floating anchor={anchor} onClose={() => setOpen(false)} height={320} width={320}>
+          <div className="flex flex-col gap-2 p-2.5">
+            <input autoFocus aria-label="Search tasks" placeholder="Search your tasks" value={query} onChange={(e) => setQuery(e.target.value)} className="h-9 rounded-lg border-[1.5px] border-field px-2.5 text-[13px] focus:outline-none" />
+            <div className="flex max-h-60 flex-col overflow-y-auto">
+              {found.map((t) => (
+                <MenuItem
+                  key={t.id}
+                  onClick={() => {
+                    setOpen(false)
+                    setQuery('')
+                    onPick(t.id)
+                  }}
+                >
+                  <span className="truncate">{t.title}</span>
+                </MenuItem>
+              ))}
+              {found.length === 0 && <span className="px-2 py-2 text-xs text-muted">No open tasks match.</span>}
+            </div>
+          </div>
+        </Floating>
+      )}
+    </>
+  )
+}
+
 /* Notes and activity: one box to add a note or log a call, email, or session. History below, newest first. */
 
-function NotesSection({ client }: { client: Client }) {
+function NotesSection({ client, onOpenTask }: { client: Client; onOpenTask: (id: string) => void }) {
   const { notes, addNote, today } = useClients()
   const { workspace } = useWorkspace()
   const { peopleOf } = useClientInfo()
@@ -301,7 +346,12 @@ function NotesSection({ client }: { client: Client }) {
     <div className="flex flex-col gap-2">
       <span className={`${sectionTitle} px-1`}>Notes and activity</span>
       <Card>
-        <div className="flex flex-col gap-2 px-[18px] py-3">
+        <div className="flex items-start gap-2 px-[18px] py-3">
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Dropdown label="Kind" value={kind} options={noteKinds} onChange={setKind} />
+            {crew.length > 0 && <Dropdown label="With" value={withId} options={[{ value: '', label: 'With: nobody' }, ...crew.map((p) => ({ value: p.id, label: `With: ${firstName(p.name) || 'Unnamed'}` }))]} onChange={setWithId} />}
+            <DatePicker label="When" value={date ?? today} today={today} weekStart={workspace?.week_start} clearable={false} onChange={(d) => setDate(d)} />
+          </div>
           <textarea
             aria-label="Add a note"
             rows={body ? 3 : 1}
@@ -314,23 +364,17 @@ function NotesSection({ client }: { client: Client }) {
                 save()
               }
             }}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed placeholder:text-faint focus:outline-none"
+            className="min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none"
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <Dropdown label="Kind" value={kind} options={noteKinds} onChange={setKind} />
-            {crew.length > 0 && <Dropdown label="With" value={withId} options={[{ value: '', label: 'With: nobody in particular' }, ...crew.map((p) => ({ value: p.id, label: `With: ${firstName(p.name) || 'Unnamed'}` }))]} onChange={setWithId} />}
-            <DatePicker label="When" value={date ?? today} today={today} weekStart={workspace?.week_start} clearable={false} onChange={(d) => setDate(d)} />
-            <div className="flex-1" />
-            {body.trim() && (
-              <Button size="sm" variant="primary" onClick={save}>
-                Add
-              </Button>
-            )}
-          </div>
+          {body.trim() && (
+            <Button size="sm" variant="primary" onClick={save}>
+              Add
+            </Button>
+          )}
         </div>
         {mine.map((n) => (
           <div key={n.id} className="border-t border-divider">
-            <NoteRow note={n} />
+            <NoteRow note={n} onOpenTask={onOpenTask} />
           </div>
         ))}
       </Card>
@@ -369,13 +413,15 @@ function PeopleSection({ client, onOpen }: { client: Client; onOpen: (id: string
     <SideSection title="People">
       {shown.map((p) => (
         <div key={p.id} role="button" tabIndex={0} onClick={() => onOpen(p.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(p.id)} className="-mx-2 flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-divider">
-          <Avatar name={p.name} size={32} />
+          <Avatar name={p.name} size={32} photo={p.photo_url} />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-semibold">{p.name || 'Unnamed'}</span>
-              {p.is_main_contact && <span className="shrink-0 rounded-md bg-divider px-1.5 py-0.5 text-[11px] font-medium text-muted">Main contact</span>}
-            </span>
-            {p.role && <span className="truncate text-xs text-muted">{p.role}</span>}
+            <span className="text-sm leading-snug font-semibold break-words">{p.name || 'Unnamed'}</span>
+            {(p.is_main_contact || p.role) && (
+              <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+                {p.is_main_contact && <span className="shrink-0 rounded-md bg-divider px-1.5 py-px text-[11px] font-medium text-muted">Main contact</span>}
+                {p.role && <span className="truncate">{p.role}</span>}
+              </span>
+            )}
           </span>
           <CopyButton text={p.email} label="Copy email" />
         </div>
@@ -433,7 +479,7 @@ function ContactSection({ client }: { client: Client }) {
         </InfoRow>
       )}
       <InfoRow label="Phone">
-        <InlineText label="Phone" value={client.phone} placeholder="Add a phone" onSave={(phone) => updateClient(client.id, { phone })} className="flex-1" />
+        <InlineText label="Phone" value={client.phone} placeholder="Add a phone" onSave={(phone) => updateClient(client.id, { phone: formatPhone(phone) })} className="flex-1" />
         <CopyButton text={client.phone} />
       </InfoRow>
       <InfoRow label="Website">

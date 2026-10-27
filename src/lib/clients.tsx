@@ -20,6 +20,7 @@ export type Client = {
   email: string
   time_zone: string | null
   socials: Social[]
+  photo_url: string | null
   order_in_stage: number
   created_at: string
 }
@@ -33,6 +34,7 @@ export type Person = {
   email: string
   phone: string
   socials: Social[]
+  photo_url: string | null
   is_main_contact: boolean
   sort_order: number
   created_at: string
@@ -66,19 +68,30 @@ export type Field = {
 
 export type FieldValue = { id: string; field_id: string; item_type: string; item_id: string; value: unknown }
 
-export type ItemType = 'task' | 'client' | 'person'
+export type ItemType = 'task' | 'client' | 'person' | 'note'
 export type Connection = { id: string; from_type: ItemType; from_id: string; to_type: ItemType; to_id: string; created_at: string }
 
 export type FileLink = { id: string; item_type: string; item_id: string; name: string; url: string; kind: 'file' | 'link'; created_at: string }
 
+// The kinds you can pick when adding a note.
 export const noteKinds: { value: NoteKind; label: string }[] = [
   { value: 'note', label: 'Note' },
   { value: 'call', label: 'Call' },
   { value: 'email', label: 'Email' },
   { value: 'session', label: 'Session' },
-  { value: 'became_active', label: 'Became active' },
 ]
-export const noteKindLabel = (k: NoteKind) => noteKinds.find((n) => n.value === k)?.label ?? 'Update'
+export const noteKindLabel = (k: NoteKind) => noteKinds.find((n) => n.value === k)?.label ?? (k === 'became_active' ? 'Became active' : 'Update')
+
+// Phone numbers: US numbers get (205) 555-0148. Anything starting with + (another country) stays as typed.
+export function formatPhone(raw: string) {
+  const text = raw.trim()
+  if (!text || (text.startsWith('+') && !text.startsWith('+1'))) return text
+  const [main, ext] = text.split(/\s*(?:x|ext\.?)\s*/i)
+  let d = main.replace(/\D/g, '')
+  if (d.length === 11 && d.startsWith('1')) d = d.slice(1)
+  if (d.length !== 10) return text
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}${ext ? ` ext. ${ext.replace(/\D/g, '')}` : ''}`
+}
 
 // The stage API that the shared stage editor and stage menus work with. Tasks and Clients both provide one.
 export type StageApi = {
@@ -124,6 +137,7 @@ type ClientsState = StageApi & {
   connect: (from: { type: ItemType; id: string }, to: { type: ItemType; id: string }) => Promise<void>
   disconnect: (id: string) => Promise<void>
   addLink: (itemType: ItemType, itemId: string, url: string, name: string) => Promise<void>
+  uploadPhoto: (file: File) => Promise<string | null>
   removeFile: (id: string) => Promise<void>
 }
 
@@ -416,6 +430,26 @@ export function ClientsProvider({ children }: { children: ReactNode }) {
     [workspaceId, fail],
   )
 
+  // Saves a photo or logo to the workspace's folder and hands back its web address.
+  const uploadPhoto = useCallback(
+    async (file: File) => {
+      if (!workspaceId) return null
+      if (file.size > 5 * 1024 * 1024) {
+        toast('That picture is over 5 MB. Try a smaller one.')
+        return null
+      }
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase()
+      const path = `${workspaceId}/${newOptionId()}.${ext}`
+      const { error } = await supabase.storage.from('photos').upload(path, file, { contentType: file.type })
+      if (error) {
+        toast("Couldn't upload that picture. Try a PNG or JPG.")
+        return null
+      }
+      return supabase.storage.from('photos').getPublicUrl(path).data.publicUrl
+    },
+    [workspaceId, toast],
+  )
+
   const removeFile = useCallback(async (id: string) => {
     setFiles((list) => list.filter((f) => f.id !== id))
     await supabase.from('files').delete().eq('id', id)
@@ -524,6 +558,7 @@ export function ClientsProvider({ children }: { children: ReactNode }) {
         connect,
         disconnect,
         addLink,
+        uploadPhoto,
         removeFile,
         addStatus,
         updateStatus,

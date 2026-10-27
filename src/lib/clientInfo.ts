@@ -13,6 +13,9 @@ export const initials = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join('') || '?'
 
+// Waiting on text without a leading "Waiting on" (the line already says it) and without the @ in front of tags.
+export const cleanWaiting = (text: string) => text.replace(/^\s*waiting on\s*/i, '').replace(/@(?=\S)/g, '').trim()
+
 // Answers the questions a client page asks first, by joining tasks, people, and notes.
 export function useClientInfo() {
   const { clients, people, notes, connections, fields, valueOf } = useClients()
@@ -67,17 +70,20 @@ export function useClientInfo() {
     [clients, connections, personFor],
   )
 
-  // "Dana" or "Jordan" or whatever was typed, for Waiting on lines.
-  const waitingName = useCallback(
+  // The client or person a task is tagged as waiting on: "Dana", "Jordan", or "Bright Path Co.".
+  const waitingWho = useCallback(
     (t: Task) => {
       const person = people.find((p) => p.id === t.waiting_on_person_id)
       if (person) return firstName(person.name)
       const client = clients.find((c) => c.id === t.waiting_on_client_id)
       if (client) return client.kind === 'person' ? firstName(client.name) : client.name
-      return t.waiting_on_text
+      return ''
     },
     [people, clients],
   )
+
+  // What a task is waiting on, for "Waiting on ___" lines: the words you typed (tags included), or the tagged name.
+  const waitingName = useCallback((t: Task) => cleanWaiting(t.waiting_on_text) || waitingWho(t), [waitingWho])
 
   const isOpen = useCallback((t: Task) => statusById(t.status_id)?.behavior === 'open', [statusById])
   const isWaiting = useCallback((t: Task) => statusById(t.status_id)?.behavior === 'waiting', [statusById])
@@ -96,10 +102,9 @@ export function useClientInfo() {
         .filter(isWaiting)
         .sort((a, b) => (a.waiting_since ?? '').localeCompare(b.waiting_since ?? ''))[0]
       if (!t) return null
-      const who = waitingName(t) || (client.kind === 'person' ? firstName(client.name) : mainContact(client.id)?.name ? firstName(mainContact(client.id)!.name) : client.name)
-      return { task: t, who }
+      return { task: t, who: waitingWho(t) }
     },
-    [tasksFor, isWaiting, waitingName, mainContact],
+    [tasksFor, isWaiting, waitingWho],
   )
 
   const lastContact = useCallback((clientId: string) => notes.find((n) => n.client_id === clientId && n.kind !== 'stage') as Note | undefined, [notes])
@@ -119,5 +124,5 @@ export function useClientInfo() {
     [mainContact, fields, valueOf],
   )
 
-  return { peopleOf, mainContact, tasksFor, tasksForPerson, personFor, clientFor, waitingName, nextUp, waitingOn, lastContact, subline }
+  return { peopleOf, mainContact, tasksFor, tasksForPerson, personFor, clientFor, waitingName, waitingWho, nextUp, waitingOn, lastContact, subline }
 }

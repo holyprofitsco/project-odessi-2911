@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import TaskModal from '../components/TaskModal'
-import { Checkbox, DueText, PriorityPill, RepeatIcon, StatusEditor, StatusPill } from '../components/taskParts'
+import { StageMenu } from '../components/clientParts'
+import { Checkbox, DueText, PriorityPill, RepeatIcon, StatusPill } from '../components/taskParts'
 import { DatePicker } from '../components/pickers'
-import { Button, Card, Dropdown, EmptyState, MenuItem, Modal, MoreMenu, Popover, useToast } from '../components/ui'
+import { Button, Card, Dropdown, EmptyState, MenuItem, Modal, Popover, useToast } from '../components/ui'
 import { addDays, describeRepeat, diffDays, formatDate, weekdayNames, weekdayOf } from '../lib/dates'
-import { priorityRank, priorityStyles, useTasks, type Priority, type Task } from '../lib/tasks'
+import { priorityRank, priorityStyles, useTasks, type Priority, type Status, type Task } from '../lib/tasks'
 import { useClientInfo } from '../lib/clientInfo'
 import { useWorkspace } from '../lib/workspace'
 
@@ -108,7 +109,8 @@ const sorters: Record<Sort, (a: Task, b: Task) => number> = {
 }
 
 function ListView({ onOpen }: { onOpen: (id: string) => void }) {
-  const { today, statuses, statusById, setStatus, firstOpenStatus, addTask, setOrder } = useTasks()
+  const tasksApi = useTasks()
+  const { today, statuses, statusById, setStatus, firstOpenStatus, addTask, setOrder } = tasksApi
   const { workspace } = useWorkspace()
   const toast = useToast()
   const { clientFor } = useClientInfo()
@@ -117,6 +119,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
   const [group, setGroup] = useState<Group>(() => readPref('odessi:tasks:group', 'time'))
   const [sort, setSort] = useState<Sort>(() => readPref('odessi:tasks:sort', 'due'))
   const [showDone, setShowDone] = useState(false)
+  const [showResting, setShowResting] = useState(false)
   const [quick, setQuick] = useState('')
   const [quickDate, setQuickDate] = useState<string | null | 'auto'>('auto')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -138,10 +141,12 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     const b = behavior(t)
     if (b === 'done') return tab === 'all' || (tab === 'today' && doneToday(t))
     if (tab === 'all') return true
-    if (tab === 'today') return b === 'waiting' || (!!t.due_date && t.due_date <= today)
+    // Waiting tasks only come into Today on their check-in day. Until then they rest in a folded list at the bottom.
+    if (tab === 'today') return b === 'waiting' ? !!t.waiting_check_in && t.waiting_check_in <= today : !!t.due_date && t.due_date <= today
     return b !== 'waiting' && !!t.due_date && t.due_date > today
   })
   const open = inTab.filter((t) => behavior(t) !== 'done').sort(sorters[sort])
+  const resting = tab === 'today' ? visible.filter((t) => behavior(t) === 'waiting' && !(t.waiting_check_in && t.waiting_check_in <= today)).sort(sorters[sort]) : []
   const done = inTab.filter((t) => behavior(t) === 'done').sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? ''))
 
   const sections: { key: string; title: string; tasks: Task[] }[] = []
@@ -165,7 +170,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     push('morning', 'Morning', now.filter((t) => t.due_time && t.due_time.slice(0, 5) < morningEnds))
     push('afternoon', 'Afternoon', now.filter((t) => t.due_time && t.due_time.slice(0, 5) >= morningEnds && t.due_time.slice(0, 5) < afternoonEnds))
     push('evening', 'Evening', now.filter((t) => t.due_time && t.due_time.slice(0, 5) >= afternoonEnds))
-    push('waiting', 'Waiting', open.filter(isWaiting))
+    push('waiting', 'Time to check in', open.filter(isWaiting))
   } else if (group === 'time') {
     push('past', 'Past due', open.filter((t) => t.due_date && t.due_date < today))
     const dated = open.filter((t) => t.due_date && t.due_date >= today)
@@ -303,9 +308,12 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
         sections.map((s) => (
           <div key={s.key} className="flex flex-col gap-1.5">
             {s.title && (
-              <h2 className="px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
-                {s.title} · {s.tasks.length}
-              </h2>
+              <div className="flex items-center gap-1 px-1">
+                <h2 className="text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
+                  {s.title} · {s.tasks.length}
+                </h2>
+                {group === 'status' && statusById(s.key) && <StageMenu stage={statusById(s.key)!} api={tasksApi} />}
+              </div>
             )}
             <Card>
               {s.tasks.map((t) => (
@@ -314,6 +322,22 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             </Card>
           </div>
         ))
+      )}
+
+      {resting.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <button type="button" onClick={() => setShowResting(!showResting)} className="w-fit px-1 text-[13px] font-medium text-muted hover:text-ink">
+            {showResting ? '⌄' : '›'} Waiting on others · {resting.length}
+            <span className="font-normal text-faint"> · they show up here on their check-in day</span>
+          </button>
+          {showResting && (
+            <Card>
+              {resting.map((t) => (
+                <TaskRow key={t.id} {...rowProps(t, resting)} showStatus={false} />
+              ))}
+            </Card>
+          )}
+        </div>
       )}
 
       {done.length > 0 && (
@@ -584,13 +608,13 @@ function BoardCard({ t, onOpen }: { t: Task; onOpen: (id: string) => void }) {
   )
 }
 
-type Column = { key: string; head: ReactNode; tasks: Task[]; drop?: (t: Task) => void; add?: Partial<Task>; stage?: boolean }
+type Column = { key: string; head: ReactNode; tasks: Task[]; drop?: (t: Task) => void; add?: Partial<Task>; stage?: Status }
 
 function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (changes: Partial<Task>) => void }) {
-  const { statuses, statusById, setStatus, updateTask, today } = useTasks()
+  const tasksApi = useTasks()
+  const { statuses, statusById, setStatus, updateTask, today } = tasksApi
   const toast = useToast()
   const visible = useVisibleTasks()
-  const [editing, setEditing] = useState(false)
   const [doneOpen, setDoneOpen] = useState(false)
   const [overId, setOverId] = useState<string | null>(null)
   const [by, setBy] = useState<BoardGroup>(() => readPref('odessi:tasks:boardGroup', 'status'))
@@ -619,7 +643,7 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
   } else {
     columns = statuses
       .filter((s) => s.behavior === 'open' || s.behavior === 'waiting')
-      .map((s) => ({ key: s.id, head: <StatusPill status={s} />, tasks: visible.filter((t) => t.status_id === s.id).sort(byDue), drop: (t) => setStatus(t, s.id), add: { status_id: s.id }, stage: true }))
+      .map((s) => ({ key: s.id, head: <StatusPill status={s} />, tasks: visible.filter((t) => t.status_id === s.id).sort(byDue), drop: (t) => setStatus(t, s.id), add: { status_id: s.id }, stage: s }))
   }
 
   // Columns you can't drop onto (Past due, Later) only show while they hold something.
@@ -669,21 +693,7 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
             <div className="flex items-center gap-2 px-1">
               {c.head}
               <span className="text-[13px] text-faint">{c.tasks.length}</span>
-              <div className="flex-1" />
-              {c.stage && (
-                <MoreMenu>
-                  {(close) => (
-                    <MenuItem
-                      onClick={() => {
-                        close()
-                        setEditing(true)
-                      }}
-                    >
-                      Edit stages…
-                    </MenuItem>
-                  )}
-                </MoreMenu>
-              )}
+              {c.stage && <StageMenu stage={c.stage} api={tasksApi} sideways />}
             </div>
             {c.tasks.map((t) => (
               <BoardCard key={t.id} t={t} onOpen={onOpen} />
@@ -713,7 +723,6 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
             {doneOpen && doneTasks.map((t) => <BoardCard key={t.id} t={t} onOpen={onOpen} />)}
           </div>
         )}
-        <StatusEditor open={editing} onClose={() => setEditing(false)} />
       </div>
     </div>
   )
