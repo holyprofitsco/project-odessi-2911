@@ -328,7 +328,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {createPortal(
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
           {toasts.map((t) => (
-            <div key={t.id} className="pointer-events-auto flex h-11 items-center gap-4 rounded-xl bg-ink pr-2 pl-4 text-[13px] text-white shadow-popup">
+            <div
+              key={t.id}
+              className={cx(
+                'pointer-events-auto flex h-11 items-center gap-4 rounded-xl bg-ink pl-4 text-[13px] text-white shadow-popup',
+                t.onUndo ? 'pr-2' : 'pr-4',
+              )}
+            >
               <span>{t.message}</span>
               {t.onUndo && (
                 <button
