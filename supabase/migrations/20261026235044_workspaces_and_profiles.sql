@@ -42,11 +42,9 @@ create table public.profiles (
 );
 create index profiles_workspace_id_idx on public.profiles (workspace_id);
 
--- Membership check used by every policy. Lives in a private schema so it is not callable through the API.
-create schema if not exists private;
-grant usage on schema private to authenticated;
+-- Membership check used by every policy. Security definer so it can read workspace_members without tripping its own policies.
 
-create function private.is_workspace_member(ws uuid)
+create function public.is_workspace_member(ws uuid)
 returns boolean
 language sql
 stable
@@ -58,23 +56,23 @@ as $$
     where m.workspace_id = ws and m.user_id = (select auth.uid())
   );
 $$;
-revoke execute on function private.is_workspace_member(uuid) from public, anon;
-grant execute on function private.is_workspace_member(uuid) to authenticated;
+revoke execute on function public.is_workspace_member(uuid) from public, anon;
+grant execute on function public.is_workspace_member(uuid) to authenticated;
 
 alter table public.workspaces enable row level security;
 alter table public.workspace_members enable row level security;
 alter table public.profiles enable row level security;
 
 create policy "Members can see their workspace" on public.workspaces
-  for select to authenticated using (private.is_workspace_member(id));
+  for select to authenticated using (public.is_workspace_member(id));
 create policy "Members can update their workspace" on public.workspaces
-  for update to authenticated using (private.is_workspace_member(id)) with check (private.is_workspace_member(id));
+  for update to authenticated using (public.is_workspace_member(id)) with check (public.is_workspace_member(id));
 
 create policy "Members can see who is in their workspace" on public.workspace_members
-  for select to authenticated using (private.is_workspace_member(workspace_id));
+  for select to authenticated using (public.is_workspace_member(workspace_id));
 
 create policy "Members can see profiles in their workspace" on public.profiles
-  for select to authenticated using (private.is_workspace_member(workspace_id));
+  for select to authenticated using (public.is_workspace_member(workspace_id));
 create policy "People can update their own profile" on public.profiles
   for update to authenticated using (id = (select auth.uid())) with check (id = (select auth.uid()));
 
