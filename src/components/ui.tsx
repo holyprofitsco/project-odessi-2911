@@ -182,7 +182,7 @@ export function MenuItem({
       type="button"
       onClick={onClick}
       className={cx(
-        'flex h-8 w-full items-center justify-between gap-3 rounded-lg px-2.5 text-left text-[13px] hover:bg-divider',
+        'flex min-h-8 w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1 text-left text-[13px] hover:bg-divider',
         selected && 'font-semibold',
         danger ? 'text-[#B3261E]' : 'text-ink',
       )}

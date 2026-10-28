@@ -307,7 +307,7 @@ export function StageMenu({ stage, api, sideways }: { stage: Status; api: StageA
         …
       </button>
       {open && (
-        <Floating anchor={anchor} onClose={close} height={330} width={248}>
+        <Floating anchor={anchor} onClose={close} height={364} width={248}>
           <div className="flex flex-col gap-1 p-1">
             {label('Name')}
             <div className="px-1.5">
@@ -366,6 +366,14 @@ export function StageMenu({ stage, api, sideways }: { stage: Status; api: StageA
                 {sideways ? 'Move right' : 'Move down'}
               </MenuItem>
             )}
+            <MenuItem
+              onClick={() => {
+                close()
+                api.addStatus(i > 0 ? api.statuses[i - 1].id : 'start')
+              }}
+            >
+              Add a stage before this
+            </MenuItem>
             <MenuItem
               onClick={() => {
                 close()

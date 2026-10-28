@@ -96,6 +96,7 @@ export function formatPhone(raw: string) {
 // The stage API that the shared stage editor and stage menus work with. Tasks and Clients both provide one.
 export type StageApi = {
   statuses: Status[]
+  // afterId: the stage to add after. 'start' puts the new one first.
   addStatus: (afterId?: string) => Promise<void>
   updateStatus: (id: string, changes: Partial<Status>) => Promise<void>
   moveStatus: (id: string, direction: -1 | 1) => Promise<void>

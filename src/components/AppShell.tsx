@@ -31,7 +31,24 @@ function NavItem({ to, label, Icon, expanded, end }: { to: string; label: string
 // A slim white sidebar on the left, the page on the soft gray canvas to the right.
 export default function AppShell() {
   const { workspace, profile } = useWorkspace()
-  const [expanded, setExpanded] = useState(false)
+  // Open or closed, the sidebar stays how you left it, even after a refresh.
+  const [expanded, setExpandedState] = useState(() => {
+    try {
+      return localStorage.getItem('odessi:sidebar') === 'open'
+    } catch {
+      return false
+    }
+  })
+  const setExpanded = (fn: (e: boolean) => boolean) =>
+    setExpandedState((e) => {
+      const next = fn(e)
+      try {
+        localStorage.setItem('odessi:sidebar', next ? 'open' : 'closed')
+      } catch {
+        // Storage is blocked. It just won't be remembered.
+      }
+      return next
+    })
   const navigate = useNavigate()
   const { list, dragging, dragProps } = useAreaOrder()
 
@@ -53,8 +70,8 @@ export default function AppShell() {
         </NavLink>
         <button
           type="button"
-          aria-label={expanded ? 'Collapse menu' : 'Expand menu'}
-          title={expanded ? 'Collapse menu' : 'Expand menu'}
+          aria-label={expanded ? 'Close menu' : 'Open menu'}
+          title={expanded ? 'Close menu (it stays open until you do)' : 'Open menu and keep it open'}
           onClick={() => setExpanded((e) => !e)}
           className={['mb-2 h-8 rounded-lg text-sm text-[#6E6E6B] hover:bg-divider hover:text-ink', expanded ? 'w-8 self-end' : 'w-11'].join(' ')}
         >

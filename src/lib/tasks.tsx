@@ -483,7 +483,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     // New statuses slot in after the one you picked, or just before Waiting, so Waiting, Done and Canceled stay at the end.
     const waiting = sortedStatuses.find((s) => s.behavior === 'waiting')
     const after = sortedStatuses.find((s) => s.id === afterId)
-    const at = after ? after.sort_order + 1 : waiting ? waiting.sort_order : sortedStatuses.length
+    const at = afterId === 'start' ? 0 : after ? after.sort_order + 1 : waiting ? waiting.sort_order : sortedStatuses.length
     const shifted = sortedStatuses.filter((s) => s.sort_order >= at).map((s) => ({ ...s, sort_order: s.sort_order + 1 }))
     await Promise.all(shifted.map((s) => supabase.from('statuses').update({ sort_order: s.sort_order }).eq('id', s.id)))
     const { data } = await supabase

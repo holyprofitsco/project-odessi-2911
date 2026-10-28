@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { CAPTION_MAX, newAttachmentId, useContent, type Attachment, type Content, type Platform } from '../lib/content'
-import { diffDays, formatDate, formatTime, shortDate } from '../lib/dates'
+import { CAPTION_MAX, firstTime, newAttachmentId, useContent, type Attachment, type Content, type Platform } from '../lib/content'
+import { addDays, diffDays, formatDate, formatTime, shortDate } from '../lib/dates'
 import { useWorkspace } from '../lib/workspace'
 import { withHttp } from './clientParts'
 import { pointFrom, type MenuPoint } from './ContextMenu'
@@ -64,7 +64,7 @@ export function PlatformChips({ value, onChange }: { value: string[]; onChange: 
 
 /* A multi-pick filter like "Any pillar ▾". The menu stays open so you can tick several. */
 
-export function MultiFilter({ label, any, options, value, onChange, footer }: { label: string; any: string; options: { id: string; name: string }[]; value: string[]; onChange: (ids: string[]) => void; footer?: ReactNode }) {
+export function MultiFilter({ label, any, options, value, onChange, footer, onRename, onRemove }: { label: string; any: string; options: { id: string; name: string }[]; value: string[]; onChange: (ids: string[]) => void; footer?: ReactNode; onRename?: (id: string, name: string) => void; onRemove?: (id: string) => void }) {
   const first = options.find((o) => o.id === value[0])
   const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
   return (
@@ -87,10 +87,12 @@ export function MultiFilter({ label, any, options, value, onChange, footer }: { 
             {options.map((o) => {
               const on = value.includes(o.id)
               return (
-                <button key={o.id} type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => toggle(o.id)} className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] hover:bg-hover">
-                  <Tick on={on} />
-                  <span className="truncate">{o.name || 'Untitled'}</span>
-                </button>
+                <EditableRow key={o.id} name={o.name} onRename={onRename && ((n) => onRename(o.id, n))} onRemove={onRemove && (() => onRemove(o.id))}>
+                  <button type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => toggle(o.id)} className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] hover:bg-hover">
+                    <Tick on={on} />
+                    <span className="truncate">{o.name || 'Untitled'}</span>
+                  </button>
+                </EditableRow>
               )
             })}
             {options.length === 0 && <span className="px-2.5 py-1.5 text-xs text-muted">Nothing to pick yet.</span>}
@@ -107,6 +109,66 @@ export function MultiFilter({ label, any, options, value, onChange, footer }: { 
         </div>
       )}
     </Popover>
+  )
+}
+
+/* A row in a picker you can rename or remove right there: hover it and click Edit. */
+
+export function EditableRow({ name, onRename, onRemove, children }: { name: string; onRename?: (name: string) => void; onRemove?: () => void; children: ReactNode }) {
+  const [editing, setEditing] = useState(false)
+  if (!onRename && !onRemove) return <>{children}</>
+  if (editing)
+    return (
+      <div className="flex items-center gap-1 px-1 py-0.5">
+        <input
+          autoFocus
+          aria-label="Name"
+          defaultValue={name}
+          onBlur={(e) => {
+            const v = e.target.value.trim()
+            if (v && v !== name) onRename?.(v)
+            setEditing(false)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') {
+              e.stopPropagation()
+              setEditing(false)
+            }
+          }}
+          className="h-8 min-w-0 flex-1 rounded-lg border-[1.5px] border-field px-2 text-[13px] focus:border-ink focus:outline-none"
+        />
+        {onRemove && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setEditing(false)
+              onRemove()
+            }}
+            className="h-8 rounded-lg px-2 text-xs font-medium text-[#B3261E] hover:bg-[#FBEDEC]"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    )
+  return (
+    <div className="group/opt relative">
+      {children}
+      <button
+        type="button"
+        aria-label={`Rename or remove ${name}`}
+        title="Rename or remove"
+        onClick={(e) => {
+          e.stopPropagation()
+          setEditing(true)
+        }}
+        className="absolute top-1/2 right-1 hidden -translate-y-1/2 rounded-md bg-surface px-1.5 py-0.5 text-xs font-medium text-muted shadow-[0_0_0_1px_var(--color-border)] group-hover/opt:block hover:text-ink"
+      >
+        Edit
+      </button>
+    </div>
   )
 }
 
@@ -198,7 +260,7 @@ export function ContentMenu({ c, at, onClose, onOpen }: { c: Content; at: MenuPo
             >
               Duplicate
             </MenuItem>
-            {!c.is_idea && <MenuItem onClick={run(() => updateContent(c.id, { is_idea: true, status_id: null, publish_date: null, publish_time: null }))}>Move to Idea bank</MenuItem>}
+            {!c.is_idea && <MenuItem onClick={run(() => updateContent(c.id, { is_idea: true, status_id: null, publish_date: null, publish_time: null }))}>Back to Idea bank</MenuItem>}
             <MenuItem
               danger
               onClick={run(async () => {
@@ -239,7 +301,8 @@ function useAnchorAt(at: MenuPoint) {
 /* Platform picker for a card or idea: tick the places it's going. */
 
 export function PlatformPicker({ value, onChange, quiet }: { value: string[]; onChange: (ids: string[]) => void; quiet?: boolean }) {
-  const { platforms, addPlatform } = useContent()
+  const { platforms, addPlatform, updatePlatform, deletePlatform } = useContent()
+  const toast = useToast()
   const [draft, setDraft] = useState('')
   const picked = platforms.filter((p) => value.includes(p.id))
   return (
@@ -261,10 +324,21 @@ export function PlatformPicker({ value, onChange, quiet }: { value: string[]; on
           {platforms.map((p) => {
             const on = value.includes(p.id)
             return (
-              <button key={p.id} type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onChange(on ? value.filter((x) => x !== p.id) : [...value, p.id])} className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] hover:bg-hover">
-                <Tick on={on} />
-                {p.name}
-              </button>
+              <EditableRow
+                key={p.id}
+                name={p.name}
+                onRename={(name) => updatePlatform(p.id, { name })}
+                onRemove={() => {
+                  deletePlatform(p.id)
+                  if (on) onChange(value.filter((x) => x !== p.id))
+                  toast(`Removed ${p.name} from your platforms`)
+                }}
+              >
+                <button type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onChange(on ? value.filter((x) => x !== p.id) : [...value, p.id])} className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] hover:bg-hover">
+                  <Tick on={on} />
+                  {p.name}
+                </button>
+              </EditableRow>
             )
           })}
           <div className="border-t border-divider" />
@@ -289,7 +363,7 @@ export function PlatformPicker({ value, onChange, quiet }: { value: string[]; on
 
 /* Pick one from a list, with a way to add a new one right there (pillars, campaigns). */
 
-export function PickOne({ value, options, onPick, onAdd, empty, addLabel, quiet }: { value: string | null; options: { id: string; name: string }[]; onPick: (id: string | null) => void; onAdd?: (name: string) => Promise<string | null>; empty: string; addLabel: string; quiet?: boolean }) {
+export function PickOne({ value, options, onPick, onAdd, onRename, onRemove, empty, addLabel, quiet }: { value: string | null; options: { id: string; name: string }[]; onPick: (id: string | null) => void; onAdd?: (name: string) => Promise<string | null>; onRename?: (id: string, name: string) => void; onRemove?: (id: string) => void; empty: string; addLabel: string; quiet?: boolean }) {
   const [draft, setDraft] = useState('')
   const current = options.find((o) => o.id === value)
   return (
@@ -310,16 +384,17 @@ export function PickOne({ value, options, onPick, onAdd, empty, addLabel, quiet 
         <div className="flex w-56 flex-col gap-1 p-1">
           <div className="flex max-h-56 flex-col overflow-y-auto">
             {options.map((o) => (
-              <MenuItem
-                key={o.id}
-                selected={o.id === value}
-                onClick={() => {
-                  close()
-                  onPick(o.id)
-                }}
-              >
-                {o.name || 'Untitled'}
-              </MenuItem>
+              <EditableRow key={o.id} name={o.name} onRename={onRename && ((n) => onRename(o.id, n))} onRemove={onRemove && (() => onRemove(o.id))}>
+                <MenuItem
+                  selected={o.id === value}
+                  onClick={() => {
+                    close()
+                    onPick(o.id)
+                  }}
+                >
+                  {o.name || 'Untitled'}
+                </MenuItem>
+              </EditableRow>
             ))}
           </div>
           {value && (
@@ -360,8 +435,20 @@ export function PickOne({ value, options, onPick, onAdd, empty, addLabel, quiet 
 }
 
 export function PillarPicker({ value, onPick, quiet }: { value: string | null; onPick: (id: string | null) => void; quiet?: boolean }) {
-  const { pillars, addPillar } = useContent()
-  return <PickOne quiet={quiet} value={value} options={pillars} onPick={onPick} onAdd={async (name) => (await addPillar(name))?.id ?? null} empty={quiet ? 'Add a pillar' : 'Pick a pillar'} addLabel="New pillar" />
+  const { pillars, addPillar, updatePillar, deletePillar } = useContent()
+  return (
+    <PickOne
+      quiet={quiet}
+      value={value}
+      options={pillars}
+      onPick={onPick}
+      onAdd={async (name) => (await addPillar(name))?.id ?? null}
+      onRename={(id, name) => updatePillar(id, { name })}
+      onRemove={deletePillar}
+      empty={quiet ? 'Add a pillar' : 'Pick a pillar'}
+      addLabel="New pillar"
+    />
+  )
 }
 
 /* Saved images and links: small square thumbnails, plus a way to add either. */
@@ -512,7 +599,7 @@ export function NewContentModal({ open, onClose, preset, asIdea }: { open: boole
   const [title, setTitle] = useState('')
   const [platforms, setPlatforms] = useState<string[]>(preset?.platform_ids ?? [])
   const [date, setDate] = useState<string | null>(preset?.publish_date ?? null)
-  const [time, setTime] = useState<string | null>(preset?.publish_time ?? (preset?.platform_ids?.[0] ? (platformById(preset.platform_ids[0])?.usual_time ?? null) : null))
+  const [time, setTime] = useState<string | null>(preset?.publish_time ?? (preset?.platform_ids?.[0] ? firstTime(platformById(preset.platform_ids[0])) : null))
   const [pillar, setPillar] = useState<string | null>(preset?.pillar_id ?? null)
   const [busy, setBusy] = useState(false)
   const label = 'text-[13px] font-semibold'
@@ -586,3 +673,58 @@ export function NewContentModal({ open, onClose, preset, asIdea }: { open: boole
 
 /* "Tue, Nov 3" or "Nov 3": short dates for small spots. */
 export const tinyDate = (iso: string, today: string) => (Math.abs(diffDays(iso, today)) < 7 ? formatDate(iso, today) : shortDate(iso, today))
+
+/* Schedule an idea: pick the day and the time. It starts at the next open spot for its platform, if there is one. */
+
+export function ScheduleModal({ c, onClose, onDone }: { c: Content; onClose: () => void; onDone?: () => void }) {
+  const { updateContent, firstStatus, today, platformsOf, openSpots } = useContent()
+  const { workspace } = useWorkspace()
+  const toast = useToast()
+  const platform = platformsOf(c)[0]
+  const spot = platform ? openSpots(today, addDays(today, 60)).find((s) => s.platform.id === platform.id) : undefined
+  const [date, setDate] = useState<string | null>(c.publish_date ?? spot?.date ?? null)
+  const [time, setTime] = useState<string | null>(c.publish_time ?? spot?.time ?? firstTime(platform))
+  const label = 'text-[13px] font-semibold'
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Schedule ${c.title || 'this idea'}`}
+      footer={
+        <>
+          <span className="text-xs text-faint">It goes on your board at {firstStatus?.name ?? 'the first step'}</span>
+          <div className="flex gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={!date}
+              onClick={async () => {
+                onClose()
+                await updateContent(c.id, { publish_date: date, publish_time: time, is_idea: false, status_id: c.status_id ?? firstStatus?.id ?? null })
+                toast(`${c.title || 'Idea'} is scheduled for ${formatDate(date!, today)}`)
+                onDone?.()
+              }}
+            >
+              Schedule
+            </Button>
+          </div>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-6">
+          <div className="flex flex-col gap-1.5">
+            <span className={label}>Day</span>
+            <DatePicker label="Day" value={date} today={today} weekStart={workspace?.week_start} placeholder="Pick a day" onChange={setDate} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className={label}>Time</span>
+            <TimePicker label="Time" value={time} onChange={setTime} />
+          </div>
+        </div>
+        {spot && date === spot.date && <span className="text-xs text-muted">That’s your next open {spot.platform.name} spot.</span>}
+        {platform && platform.times.length > 0 && <span className="text-xs text-faint">Your usual {platform.name} {platform.times.length === 1 ? 'time is' : 'times are'} {platform.times.map(formatTime).join(' and ')}.</span>}
+      </div>
+    </Modal>
+  )
+}

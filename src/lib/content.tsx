@@ -9,7 +9,8 @@ import { useWorkspace } from './workspace'
 
 export type Shape = 'wide' | 'square' | 'tall' | 'text'
 
-export type Platform = { id: string; name: string; shape: Shape; days: number[]; usual_time: string | null; sort_order: number }
+// times: the posts you aim for on a posting day, one time each. Empty means one post, any time.
+export type Platform = { id: string; name: string; shape: Shape; days: number[]; times: string[]; sort_order: number }
 export type Pillar = { id: string; name: string; sort_order: number }
 export type Campaign = { id: string; name: string; start_date: string | null; end_date: string | null; color_bg: string; color_text: string }
 export type Attachment = { id: string; name: string; url: string; kind: 'image' | 'link' }
@@ -56,8 +57,11 @@ export const shapeInfo: Record<Shape, { label: string; hint: string }> = {
   text: { label: 'Writing', hint: 'The first lines show, like LinkedIn or Substack' },
 }
 
-// An open spot: a day and platform your rhythm expects a post on, with nothing planned yet.
-export type OpenSpot = { date: string; platform: Platform }
+// An open spot: a day, platform and time your rhythm expects a post on, with nothing planned for it yet.
+export type OpenSpot = { key: string; date: string; platform: Platform; time: string | null }
+
+// The first time a platform usually posts, if it has one.
+export const firstTime = (p: Platform | undefined) => p?.times[0] ?? null
 
 type ContentState = StageApi & {
   loading: boolean
@@ -80,7 +84,7 @@ type ContentState = StageApi & {
   startIdea: (c: Content) => Promise<void>
   deleteContent: (id: string) => Promise<void>
   restoreContent: (c: Content) => Promise<void>
-  repurpose: (c: Content, platformId: string | null) => Promise<Content | null>
+  repurpose: (c: Content, platformId: string | null, asIdea: boolean) => Promise<Content | null>
   addPlatform: (name: string) => Promise<Platform | null>
   updatePlatform: (id: string, changes: Partial<Platform>) => Promise<void>
   movePlatform: (id: string, direction: -1 | 1) => Promise<void>
@@ -211,11 +215,11 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   )
 
   const repurpose = useCallback(
-    (c: Content, platformId: string | null) =>
+    (c: Content, platformId: string | null, asIdea: boolean) =>
       addContent({
         title: c.title,
         parent_id: c.parent_id ?? c.id,
-        is_idea: true,
+        is_idea: asIdea,
         platform_ids: platformId ? [platformId] : [],
         pillar_id: c.pillar_id,
         project_id: c.project_id,
@@ -334,8 +338,10 @@ export function ContentProvider({ children }: { children: ReactNode }) {
         const day = weekdayOf(d)
         for (const p of sortedPlatforms) {
           if (!p.days.includes(day)) continue
-          if (shown.some((c) => c.publish_date === d && c.platform_ids.includes(p.id))) continue
-          out.push({ date: d, platform: p })
+          // Each planned post fills one slot, earliest time first.
+          const slots = p.times.length ? [...p.times].sort() : [null]
+          const planned = shown.filter((c) => c.publish_date === d && c.platform_ids.includes(p.id)).length
+          slots.slice(planned).forEach((time, i) => out.push({ key: `${p.id}-${i}`, date: d, platform: p, time }))
         }
       }
       return out

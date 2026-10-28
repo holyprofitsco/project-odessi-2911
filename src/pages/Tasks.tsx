@@ -880,15 +880,24 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
                 drop: (t) => setStatus(t, doneStatus.id),
               })
             }
-            className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${doneOpen ? 'w-[300px]' : 'w-12 items-center'} ${overId === doneStatus.id ? 'bg-[#EDEDF0]' : ''}`}
+            onClick={() => !doneOpen && setDoneOpen(true)}
+            className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${doneOpen ? 'w-[300px]' : 'min-h-[420px] w-14 cursor-pointer items-center self-stretch bg-[#F2F2F4] py-3 hover:bg-[#EDEDF0]'} ${overId === doneStatus.id ? 'bg-[#EDEDF0]' : ''}`}
           >
-            <button type="button" onClick={() => setDoneOpen(!doneOpen)} className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink" aria-expanded={doneOpen}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setDoneOpen(!doneOpen)
+              }}
+              className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink"
+              aria-expanded={doneOpen}
+            >
               {doneOpen ? (
                 <>
                   <StatusPill status={doneStatus} /> {doneTasks.length}
                 </>
               ) : (
-                <span className="[writing-mode:vertical-rl]">Done · {doneTasks.length}</span>
+                <span className="text-sm font-semibold [writing-mode:vertical-rl]">Done · {doneTasks.length}</span>
               )}
             </button>
             {doneOpen && doneTasks.map((t) => <BoardCard key={t.id} t={t} onOpen={onOpen} />)}

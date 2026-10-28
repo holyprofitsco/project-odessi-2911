@@ -21,11 +21,11 @@ export default function ContentSettings() {
       <SettingsTitle title="Content" description="How your content area works" />
 
       <Card>
-        <CardHeader title="Posting rhythm" description="The days you aim to post on each platform, and the usual time. Empty days show up on your calendar as open spots." />
+        <CardHeader title="Posting rhythm" description="The days you aim to post on each platform, and when. Post more than once a day? Add a time for each post. Empty spots show up on your calendar." />
         {platforms.map((p, i) => (
           <CardRow key={p.id} className="py-2">
-            <InlineText label="Platform name" value={p.name} onSave={(name) => name && updatePlatform(p.id, { name })} className="w-36 text-sm font-medium" />
-            <div className="flex gap-1">
+            <InlineText label="Platform name" value={p.name} onSave={(name) => name && updatePlatform(p.id, { name })} className="w-36 shrink-0 text-sm font-medium" />
+            <div className="flex shrink-0 gap-1">
               {order.map((d) => {
                 const on = p.days.includes(d)
                 return (
@@ -43,8 +43,7 @@ export default function ContentSettings() {
                 )
               })}
             </div>
-            <span className="ml-3 text-[13px] text-muted">at</span>
-            <TimePicker label={`${p.name} usual time`} value={p.usual_time} onChange={(usual_time) => updatePlatform(p.id, { usual_time })} />
+            <Times name={p.name} times={p.times} onChange={(times) => updatePlatform(p.id, { times })} />
             <MoreMenu>
               {(close) => (
                 <div className="w-64">
@@ -189,5 +188,39 @@ function ColorDot({ bg, onPick }: { bg: string; onPick: (bg: string, text: strin
         </div>
       )}
     </Popover>
+  )
+}
+
+/* One time per post you aim for that day. Two times means two posts a day. */
+function Times({ name, times, onChange }: { name: string; times: string[]; onChange: (next: string[]) => void }) {
+  const [adding, setAdding] = useState(false)
+  const set = (i: number, t: string | null) => onChange(t ? times.map((x, j) => (j === i ? t : x)).sort() : times.filter((_, j) => j !== i))
+  return (
+    <div className="ml-3 flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <span className="text-[13px] text-muted">at</span>
+      {times.map((t, i) => (
+        <span key={`${t}-${i}`} className="flex items-center">
+          <TimePicker label={`${name} post ${i + 1} time`} value={t} onChange={(v) => set(i, v)} />
+          <button type="button" aria-label="Remove this time" onClick={() => set(i, null)} className="ml-0.5 flex size-6 items-center justify-center rounded-full text-faint hover:bg-divider hover:text-ink">
+            ×
+          </button>
+        </span>
+      ))}
+      {times.length === 0 || adding ? (
+        <TimePicker
+          label={`${name} time`}
+          value={null}
+          onChange={(v) => {
+            if (v) onChange([...times, v].sort())
+            setAdding(false)
+          }}
+        />
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} className="h-8 rounded-lg px-2 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
+          + Add a time
+        </button>
+      )}
+      {times.length > 1 && <span className="text-xs text-faint">{times.length} posts a day</span>}
+    </div>
   )
 }

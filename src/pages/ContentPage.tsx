@@ -3,28 +3,16 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { InlineText, withHttp } from '../components/clientParts'
 import { Attachments, CaptionBox, PickOne, PillarPicker, PlatformPicker, platformLine } from '../components/contentParts'
 import { DatePicker, TimePicker } from '../components/pickers'
-import { AddTaskLine, ProjectPicker, ProjectTaskRow } from '../components/projectParts'
+import { AddTaskLine, ProjectPicker, ProjectTaskRow, TaskSetMenu, TaskSetUseModal } from '../components/projectParts'
 import TaskModal from '../components/TaskModal'
 import { StatusEditor, StatusPicker, StatusPill, TaskColumnHeaders } from '../components/taskParts'
 import { Button, Card, MenuItem, MoreMenu, Popover, useToast } from '../components/ui'
 import { useContent, type Content } from '../lib/content'
-import type { Status } from '../lib/tasks'
+import type { TaskSet } from '../lib/projects'
 import { useTasks } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
 
 const sectionTitle = 'text-[13px] font-semibold'
-
-// "Ready to film" then "Ready to edit" reads as "Done filming → Ready to edit".
-function nextLabel(current: Status | undefined, next: Status) {
-  const m = current?.name.match(/^ready to (\w+)/i)
-  if (m) {
-    const verb = m[1].toLowerCase()
-    const ing = verb.endsWith('e') ? `${verb.slice(0, -1)}ing` : /[^aeiou][aeiou][mnpt]$/.test(verb) && verb.length <= 4 ? `${verb}${verb.slice(-1)}ing` : `${verb}ing`
-    return `Done ${ing} → ${next.name}`
-  }
-  if (next.behavior === 'done') return `Mark as ${next.name.toLowerCase()}`
-  return `Move to ${next.name}`
-}
 
 export default function ContentPage() {
   const { id } = useParams()
@@ -51,6 +39,7 @@ function ContentCard({ c }: { c: Content }) {
   const toast = useToast()
   const [params, setParams] = useSearchParams()
   const [editingStages, setEditingStages] = useState(false)
+  const [useSet, setUseSet] = useState<TaskSet | null>(null)
   const taskId = params.get('task')
   const status = statusById(c.status_id)
   const at = statuses.findIndex((s) => s.id === c.status_id)
@@ -58,6 +47,11 @@ function ContentCard({ c }: { c: Content }) {
   const own = tasks.filter((t) => t.content_id === c.id && !t.parent_task_id && taskStatus(t.status_id)?.behavior !== 'canceled').sort((a, b) => a.order_in_group - b.order_in_group || a.created_at.localeCompare(b.created_at))
   const done = own.filter((t) => taskStatus(t.status_id)?.behavior === 'done').length
   const video = platformsOf(c).some((p) => p.shape === 'wide' || p.shape === 'tall')
+  const backToIdeas = () => {
+    updateContent(c.id, { is_idea: true, status_id: null, publish_date: null, publish_time: null })
+    toast(`${c.title || 'It'} is back in your Idea bank`)
+    navigate(`/content/ideas?idea=${c.id}`)
+  }
 
   const remove = async () => {
     navigate('/content')
@@ -66,98 +60,95 @@ function ContentCard({ c }: { c: Content }) {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex max-w-[1180px] flex-col gap-5">
       <div className="flex flex-col gap-2">
         <Link to="/content" className="w-fit text-[13px] text-muted hover:text-ink">
           ‹ Content
         </Link>
-        <div className="flex items-center gap-3">
-          <InlineText label="Title" value={c.title} placeholder="Name this post" onSave={(title) => updateContent(c.id, { title })} className="-ml-1.5 min-w-0 flex-1 text-2xl font-semibold tracking-tight" />
-          <MoreMenu>
-            {(close) => (
-              <div className="w-48">
-                <MenuItem
-                  onClick={() => {
-                    close()
-                    updateContent(c.id, { is_idea: true, status_id: null, publish_date: null, publish_time: null })
-                    navigate(`/content/ideas?idea=${c.id}`)
-                  }}
-                >
-                  Move to Idea bank
-                </MenuItem>
-                <MenuItem
-                  danger
-                  onClick={() => {
-                    close()
-                    remove()
-                  }}
-                >
-                  Delete
-                </MenuItem>
-              </div>
+        <InlineText label="Title" value={c.title} placeholder="Name this post" onSave={(title) => updateContent(c.id, { title })} className="-ml-1.5 text-2xl font-semibold tracking-tight" />
+        {/* The status leads. The next step is a quiet button beside it, and the pill itself changes the status. */}
+        {c.is_idea ? (
+          <div className="flex items-center gap-3 text-[13px] text-muted">
+            This is still an idea.
+            <Button variant="primary" onClick={() => api.startIdea(c)}>
+              Start
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            {status && <StatusPicker status={status} options={statuses} onPick={(sid) => setContentStatus(c, sid)} onEdit={() => setEditingStages(true)} more={[{ label: 'Back to Idea bank', onClick: backToIdeas }]} />}
+            {next && (
+              <Button size="sm" onClick={() => setContentStatus(c, next.id)}>
+                <span className="text-muted">Next:</span> {next.name} →
+              </Button>
             )}
-          </MoreMenu>
-        </div>
+            <MoreMenu>
+              {(close) => (
+                <div className="w-48">
+                  <MenuItem
+                    onClick={() => {
+                      close()
+                      backToIdeas()
+                    }}
+                  >
+                    Back to Idea bank
+                  </MenuItem>
+                  <MenuItem
+                    danger
+                    onClick={() => {
+                      close()
+                      remove()
+                    }}
+                  >
+                    Delete
+                  </MenuItem>
+                </div>
+              )}
+            </MoreMenu>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-6">
-        <div className="flex min-w-0 flex-col gap-5">
-          {c.is_idea ? (
-            <div className="flex items-center gap-3 text-[13px] text-muted">
-              This is still an idea.
-              <Button variant="primary" onClick={() => api.startIdea(c)}>
-                Start
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              {status && <StatusPicker status={status} options={statuses} onPick={(sid) => setContentStatus(c, sid)} onEdit={() => setEditingStages(true)} />}
-              {next && (
-                <Button variant="primary" onClick={() => setContentStatus(c, next.id)}>
-                  {nextLabel(status, next)}
-                </Button>
-              )}
+        {/* One card with sections, so the page reads as one piece of work. */}
+        <Card className="flex min-w-0 flex-col">
+          <Section
+            title="Tasks"
+            aside={own.length > 0 && `${done} of ${own.length} done`}
+            action={
               <Popover
                 trigger={({ toggle }) => (
-                  <Button variant="quiet" onClick={toggle}>
-                    Change status
-                  </Button>
+                  <button type="button" onClick={toggle} className="rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-divider hover:text-ink">
+                    + From a task set
+                  </button>
                 )}
               >
                 {(close) => (
-                  <div className="w-48">
-                    {statuses.map((s) => (
-                      <MenuItem
-                        key={s.id}
-                        selected={s.id === c.status_id}
-                        onClick={() => {
-                          close()
-                          setContentStatus(c, s.id)
-                        }}
-                      >
-                        <StatusPill status={s} />
-                      </MenuItem>
-                    ))}
+                  <div className="w-72">
+                    <TaskSetMenu
+                      onPick={(s) => {
+                        close()
+                        setUseSet(s)
+                      }}
+                      onManage={() => navigate('/tasks/sets')}
+                    />
                   </div>
                 )}
               </Popover>
-            </div>
-          )}
-
-          <Section title="Tasks" aside={own.length > 0 && `${done} of ${own.length} done`}>
-            <Card>
-              {own.length > 0 && <TaskColumnHeaders className="border-b border-divider px-[18px] pt-2.5 pb-2" />}
-              {own.map((t) => (
-                <ProjectTaskRow key={t.id} task={t} onOpen={(tid) => setParams({ task: tid })} onDragStart={() => {}} onDropOn={() => {}} dragging={false} />
-              ))}
-              <AddTaskLine
-                label="Add task"
-                onAdd={async (title) => {
-                  const last = own.reduce((n, t) => Math.max(n, t.order_in_group), 0)
-                  await quickAdd(title, { content_id: c.id, project_id: c.project_id, order_in_group: last + 1000 })
-                }}
-              />
-            </Card>
+            }
+            flush
+          >
+            {own.length > 0 && <TaskColumnHeaders className="border-y border-divider px-[18px] pt-2 pb-1.5" />}
+            {own.map((t) => (
+              <ProjectTaskRow key={t.id} task={t} onOpen={(tid) => setParams({ task: tid })} onDragStart={() => {}} onDropOn={() => {}} dragging={false} />
+            ))}
+            <AddTaskLine
+              label="Add task"
+              onAdd={async (title) => {
+                const last = own.reduce((n, t) => Math.max(n, t.order_in_group), 0)
+                await quickAdd(title, { content_id: c.id, project_id: c.project_id, order_in_group: last + 1000 })
+              }}
+            />
           </Section>
 
           <Section title="Script">
@@ -165,10 +156,8 @@ function ContentCard({ c }: { c: Content }) {
           </Section>
 
           <Section title="Attachments" aside={c.attachments.length > 0 && `${c.attachments.length} ${c.attachments.length === 1 ? 'file' : 'files'}`}>
-            <Card className="p-4">
-              <Attachments list={c.attachments} onChange={(attachments) => updateContent(c.id, { attachments })} cover={c.cover_url} onCover={(cover_url) => updateContent(c.id, { cover_url })} />
-              {c.attachments.some((a) => a.kind === 'image') && <p className="pt-2 text-xs text-faint">Hover a picture to make it the cover. The cover shows on your board.</p>}
-            </Card>
+            <Attachments list={c.attachments} onChange={(attachments) => updateContent(c.id, { attachments })} cover={c.cover_url} onCover={(cover_url) => updateContent(c.id, { cover_url })} />
+            {c.attachments.some((a) => a.kind === 'image') && <p className="pt-2 text-xs text-faint">Hover a picture to make it the cover. The cover shows on your board.</p>}
           </Section>
 
           <Section title={video ? 'Video description' : 'Caption'}>
@@ -177,35 +166,62 @@ function ContentCard({ c }: { c: Content }) {
 
           {c.idea_note.trim() && (
             <Section title="From the idea">
-              <p className="rounded-xl bg-[#F7F7F9] p-3 text-[13px] leading-relaxed whitespace-pre-wrap text-muted">{c.idea_note}</p>
+              <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-muted">{c.idea_note}</p>
             </Section>
           )}
-        </div>
-
-        <Card className="flex flex-col gap-6 p-5">
-          <Details c={c} />
-          <Family c={c} />
-          <button type="button" onClick={remove} className="-mb-1 w-fit text-xs text-faint hover:text-[#A4574E] hover:underline">
-            Delete this post
-          </button>
         </Card>
+
+        <div className="flex flex-col gap-4">
+          <PostPreview c={c} />
+          <Card className="flex flex-col gap-6 p-5">
+            <Details c={c} />
+            <Family c={c} />
+            <button type="button" onClick={remove} className="-mb-1 w-fit text-xs text-faint hover:text-[#A4574E] hover:underline">
+              Delete this post
+            </button>
+          </Card>
+        </div>
       </div>
 
       <StatusEditor open={editingStages} onClose={() => setEditingStages(false)} api={api} />
+      <TaskSetUseModal set={useSet} onClose={() => setUseSet(null)} extra={{ content_id: c.id, project_id: c.project_id }} />
       {taskId && <TaskModal taskId={taskId} onClose={() => setParams({})} />}
     </div>
   )
 }
 
-function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+function Section({ title, aside, action, flush, children }: { title: string; aside?: ReactNode; action?: ReactNode; flush?: boolean; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-2">
+    <section className={`flex flex-col gap-2.5 border-divider pt-4 [&+&]:border-t ${flush ? 'pb-1' : 'px-5 pb-5'}`}>
+      <div className={`flex items-center gap-2 ${flush ? 'px-5' : ''}`}>
         <h2 className={sectionTitle}>{title}</h2>
         {aside && <span className="text-xs text-faint">{aside}</span>}
+        {action}
       </div>
-      {children}
-    </div>
+      <div>{children}</div>
+    </section>
+  )
+}
+
+/* A look at the post as it'll appear: the cover in its platform's shape, or the first lines of the caption. */
+
+function PostPreview({ c }: { c: Content }) {
+  const { platformsOf } = useContent()
+  const list = platformsOf(c)
+  const shape = list[0]?.shape ?? 'square'
+  const words = c.caption.trim()
+  const frame = shape === 'wide' ? 'aspect-video' : shape === 'tall' ? 'mx-auto aspect-[9/16] w-1/2' : 'aspect-[4/5]'
+  return (
+    <Card className="flex flex-col gap-2 p-3">
+      <span className="px-1 text-[11px] font-semibold tracking-[0.04em] text-faint uppercase">{platformLine(list)}</span>
+      {c.cover_url && shape !== 'text' ? (
+        <img src={c.cover_url} alt="" className={`w-full rounded-xl object-cover ${frame}`} />
+      ) : shape === 'text' || words ? (
+        <p className={`line-clamp-6 rounded-xl bg-[#F7F7F9] p-3 text-[13px] leading-relaxed whitespace-pre-wrap ${words ? 'text-ink' : 'text-faint'}`}>{words || 'The first lines of your post will show here.'}</p>
+      ) : (
+        <div className={`flex w-full items-center justify-center rounded-xl border-[1.5px] border-dashed border-field px-4 text-center text-xs text-faint ${frame}`}>Add a picture under Attachments and make it the cover</div>
+      )}
+    </Card>
   )
 }
 
@@ -259,7 +275,7 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Details({ c }: { c: Content }) {
-  const { updateContent, today, campaigns, addCampaign } = useContent()
+  const { updateContent, today, campaigns, addCampaign, updateCampaign, deleteCampaign } = useContent()
   const { workspace } = useWorkspace()
   return (
     <div className="flex flex-col gap-1.5">
@@ -282,7 +298,17 @@ function Details({ c }: { c: Content }) {
         <ProjectPicker value={c.project_id} onPick={(project_id) => updateContent(c.id, { project_id })} />
       </InfoRow>
       <InfoRow label="Campaign">
-        <PickOne quiet value={c.campaign_id} options={campaigns} onPick={(campaign_id) => updateContent(c.id, { campaign_id })} onAdd={async (name) => (await addCampaign({ name, start_date: c.publish_date, end_date: c.publish_date }))?.id ?? null} empty="Add a campaign" addLabel="New campaign" />
+        <PickOne
+          quiet
+          value={c.campaign_id}
+          options={campaigns}
+          onPick={(campaign_id) => updateContent(c.id, { campaign_id })}
+          onAdd={async (name) => (await addCampaign({ name, start_date: c.publish_date, end_date: c.publish_date }))?.id ?? null}
+          onRename={(id, name) => updateCampaign(id, { name })}
+          onRemove={deleteCampaign}
+          empty="Add a campaign"
+          addLabel="New campaign"
+        />
       </InfoRow>
       {!workspace?.solo_mode && (
         <InfoRow label="Owner">
@@ -296,7 +322,7 @@ function Details({ c }: { c: Content }) {
 /* Content family: the original, plus the pieces made from it. */
 
 function Family({ c }: { c: Content }) {
-  const { items, platformsOf, statusById, repurpose, platforms } = useContent()
+  const { items, platformsOf, statusById, repurpose } = useContent()
   const navigate = useNavigate()
   const original = c.parent_id ? items.find((x) => x.id === c.parent_id) : c
   const root = original ?? c
@@ -332,23 +358,43 @@ function Family({ c }: { c: Content }) {
         )}
       >
         {(close) => (
-          <div className="w-60">
-            <span className="block px-2.5 pt-1.5 pb-1 text-xs text-muted">Make a new piece from this one. It starts as an idea.</span>
-            {platforms.map((p) => (
-              <MenuItem
-                key={p.id}
-                onClick={async () => {
-                  close()
-                  const made = await repurpose(c, p.id)
-                  if (made) navigate(`/content/ideas?idea=${made.id}`)
-                }}
-              >
-                For {p.name}
-              </MenuItem>
-            ))}
-          </div>
+          <RepurposeMenu
+            onMake={async (platformId, asIdea) => {
+              close()
+              const made = await repurpose(c, platformId, asIdea)
+              if (made) navigate(asIdea ? `/content/ideas?idea=${made.id}` : `/content/${made.id}`)
+            }}
+          />
         )}
       </Popover>
+    </div>
+  )
+}
+
+/* Repurpose: pick where the new piece goes, then keep it as an idea or put it straight on the board. */
+function RepurposeMenu({ onMake }: { onMake: (platformId: string | null, asIdea: boolean) => void }) {
+  const { platforms, firstStatus } = useContent()
+  const [pick, setPick] = useState<string | null>(platforms[0]?.id ?? null)
+  return (
+    <div className="flex w-72 flex-col gap-2 p-2">
+      <span className="text-xs text-muted">Make a new piece from this one, for:</span>
+      <div className="flex flex-wrap gap-1.5">
+        {platforms.map((p) => (
+          <button key={p.id} type="button" aria-pressed={pick === p.id} onClick={() => setPick(p.id)} className={`h-8 rounded-full border-[1.5px] px-3 text-[13px] font-medium ${pick === p.id ? 'border-accent bg-accent-tint text-accent' : 'border-field hover:bg-hover'}`}>
+            {p.name}
+          </button>
+        ))}
+      </div>
+      <div className="mt-1 flex flex-col gap-1 border-t border-divider pt-2">
+        <button type="button" onClick={() => onMake(pick, true)} className="flex flex-col rounded-lg px-2.5 py-1.5 text-left hover:bg-divider">
+          <span className="text-[13px] font-medium">As an idea</span>
+          <span className="text-xs text-muted">It waits in your Idea bank until you start it</span>
+        </button>
+        <button type="button" onClick={() => onMake(pick, false)} className="flex flex-col rounded-lg px-2.5 py-1.5 text-left hover:bg-divider">
+          <span className="text-[13px] font-medium">On the board</span>
+          <span className="text-xs text-muted">It starts at {firstStatus?.name ?? 'the first step'}</span>
+        </button>
+      </div>
     </div>
   )
 }

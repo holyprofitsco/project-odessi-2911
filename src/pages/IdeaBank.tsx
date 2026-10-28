@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { InlineText } from '../components/clientParts'
-import { Attachments, ContentMenu, MultiFilter, PillarPicker, PlatformPicker, platformLine, pointFrom, tinyDate, type MenuPoint } from '../components/contentParts'
-import { DatePicker } from '../components/pickers'
+import { Attachments, ContentMenu, ScheduleModal, MultiFilter, PillarPicker, PlatformPicker, platformLine, pointFrom, tinyDate, type MenuPoint } from '../components/contentParts'
 import { Button, Card, Dropdown, EmptyState, MenuItem, Modal, MoreMenu, useToast } from '../components/ui'
 import { localDay, useContent, type Content } from '../lib/content'
 import { addDays } from '../lib/dates'
@@ -14,7 +13,7 @@ const PAGE = 25
 
 // A quiet list of ideas: capture one in a line, find it later, and Start it when you're ready.
 export default function IdeaBank() {
-  const { ideas, pillars, platforms, addContent, today } = useContent()
+  const { ideas, pillars, platforms, addContent, today, updatePillar, deletePillar, updatePlatform, deletePlatform } = useContent()
   const [params, setParams] = useSearchParams()
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
@@ -78,8 +77,8 @@ export default function IdeaBank() {
           onChange={(e) => setQuery(e.target.value)}
           className="h-9 w-64 rounded-lg border-[1.5px] border-field bg-surface px-2.5 text-[13px] placeholder:text-faint focus:border-ink focus:outline-none"
         />
-        <MultiFilter label="Filter by pillar" any="Any pillar" options={pillars} value={pillarsOn} onChange={setPillarsOn} />
-        <MultiFilter label="Filter by platform" any="Any platform" options={platforms} value={platformsOn} onChange={setPlatformsOn} />
+        <MultiFilter label="Filter by pillar" any="Any pillar" options={pillars} value={pillarsOn} onChange={setPillarsOn} onRename={(id, name) => updatePillar(id, { name })} onRemove={deletePillar} />
+        <MultiFilter label="Filter by platform" any="Any platform" options={platforms} value={platformsOn} onChange={setPlatformsOn} onRename={(id, name) => updatePlatform(id, { name })} onRemove={deletePlatform} />
         <span className="ml-2 text-[13px] text-muted">Sort by:</span>
         <Dropdown
           label="Sort by"
@@ -100,7 +99,7 @@ export default function IdeaBank() {
         <EmptyState title={filtered ? 'No ideas match' : 'Your Idea bank is empty'} description={filtered ? 'Try another word, or clear the filters.' : 'Type an idea in the box above and press Enter. It doesn’t need to be ready, just saved.'} />
       ) : (
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-[minmax(0,1fr)_170px_150px_90px] gap-4 px-[18px] text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
+          <div className="grid grid-cols-[minmax(0,1fr)_170px_150px_150px] gap-4 px-[18px] text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
             <span>Idea</span>
             <span>Platform</span>
             <span>Pillar</span>
@@ -148,18 +147,19 @@ function IdeaRow({ c, onOpen }: { c: Content; onOpen: () => void }) {
         onClick={onOpen}
         onContextMenu={(e) => setMenu(pointFrom(e))}
         onKeyDown={(e) => e.key === 'Enter' && onOpen()}
-        className="group grid min-h-[50px] cursor-pointer grid-cols-[minmax(0,1fr)_170px_150px_90px] items-center gap-4 border-divider px-[18px] py-2 hover:bg-hover [&+&]:border-t"
+        className="group grid min-h-[50px] cursor-pointer grid-cols-[minmax(0,1fr)_170px_150px_150px] items-center gap-4 border-divider px-[18px] py-2 hover:bg-hover [&+&]:border-t"
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="truncate text-sm font-medium">{c.title || 'Untitled idea'}</span>
-          {hints.length > 0 && <span className="shrink-0 text-xs text-faint group-hover:hidden">Has {hints.join(', ')}</span>}
-          <span className="hidden shrink-0 items-center gap-1.5 group-hover:flex">
-            <IdeaActions c={c} small />
-          </span>
+          {hints.length > 0 && <span className="shrink-0 text-xs text-faint">Has {hints.join(', ')}</span>}
         </span>
         <span className="truncate text-[13px] text-muted">{platformLine(platformsOf(c))}</span>
         <span className={`truncate text-[13px] ${pillar ? 'text-muted' : 'text-faint'}`}>{pillar?.name ?? 'No pillar'}</span>
-        <span className="text-[13px] text-muted">{tinyDate(localDay(c.created_at, workspace?.time_zone ?? 'UTC'), today)}</span>
+        {/* Schedule and Start take the Saved spot on hover, at the end of the row, away from the name you click. */}
+        <span className="text-[13px] text-muted group-hover:hidden">{tinyDate(localDay(c.created_at, workspace?.time_zone ?? 'UTC'), today)}</span>
+        <span className="hidden group-hover:flex">
+          <IdeaActions c={c} small />
+        </span>
       </div>
       {menu && <ContentMenu c={c} at={menu} onClose={() => setMenu(null)} onOpen={onOpen} />}
     </>
@@ -169,27 +169,13 @@ function IdeaRow({ c, onOpen }: { c: Content; onOpen: () => void }) {
 /* Schedule (pick a day, and it goes on the board) and Start (it goes on the board with no date yet). */
 
 function IdeaActions({ c, small, onDone }: { c: Content; small?: boolean; onDone?: () => void }) {
-  const { startIdea, updateContent, firstStatus, today } = useContent()
-  const { workspace } = useWorkspace()
-  const toast = useToast()
+  const { startIdea } = useContent()
+  const [scheduling, setScheduling] = useState(false)
   return (
     <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="flex items-center gap-1.5">
-      <span className={small ? 'w-[84px]' : 'w-[96px]'}>
-        <DatePicker
-          label="Schedule"
-          value={null}
-          today={today}
-          weekStart={workspace?.week_start}
-          clearable={false}
-          onChange={async (d) => {
-            if (!d) return
-            await updateContent(c.id, { publish_date: d, is_idea: false, status_id: firstStatus?.id ?? null })
-            toast(`${c.title || 'Idea'} is scheduled and on the board`)
-            onDone?.()
-          }}
-          cell={<span className={`flex w-full items-center justify-center rounded-lg border border-border bg-surface font-medium hover:bg-divider ${small ? 'h-7 text-xs' : 'h-9 text-sm'}`}>Schedule</span>}
-        />
-      </span>
+      <Button size="sm" className={small ? 'h-7 px-2.5 text-xs' : 'h-9 px-3.5 text-sm'} onClick={() => setScheduling(true)}>
+        Schedule
+      </Button>
       <Button
         size="sm"
         variant={small ? 'secondary' : 'primary'}
@@ -201,6 +187,7 @@ function IdeaActions({ c, small, onDone }: { c: Content; small?: boolean; onDone
       >
         Start
       </Button>
+      {scheduling && <ScheduleModal c={c} onClose={() => setScheduling(false)} onDone={onDone} />}
     </span>
   )
 }

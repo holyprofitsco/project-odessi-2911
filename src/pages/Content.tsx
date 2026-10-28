@@ -88,7 +88,7 @@ function Board({ onNew }: { onNew: (preset: Partial<Item>) => void }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <PlatformChips value={platformsOn} onChange={setPlatformsOn} />
-        <MultiFilter label="Filter by pillar" any="Any pillar" options={pillars} value={pillarsOn} onChange={setPillarsOn} />
+        <MultiFilter label="Filter by pillar" any="Any pillar" options={pillars} value={pillarsOn} onChange={setPillarsOn} onRename={(id, name) => api.updatePillar(id, { name })} onRemove={api.deletePillar} />
         <Dropdown
           label="When"
           value={when}
@@ -105,10 +105,6 @@ function Board({ onNew }: { onNew: (preset: Partial<Item>) => void }) {
           }}
         />
       </div>
-
-      {cards.length === 0 && (
-        <EmptyState title="Nothing on your board yet" description="Add a post with + New content, or start one from your Idea bank. Each column is a step, and you can rename them with the “…” beside any step." />
-      )}
 
       <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {columns.map((s) => {
@@ -141,15 +137,25 @@ function Board({ onNew }: { onNew: (preset: Partial<Item>) => void }) {
             onDragOver={(e) => over(e, postedStatus.id)}
             onDragLeave={() => setOverId(null)}
             onDrop={(e) => drop(e, postedStatus.id)}
-            className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${postedOpen ? 'w-[236px]' : 'w-12 items-center'} ${overId === postedStatus.id ? 'bg-[#EDEDF0]' : ''}`}
+            onClick={() => !postedOpen && setPostedOpen(true)}
+            className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${postedOpen ? 'w-[236px]' : 'min-h-[420px] w-14 cursor-pointer items-center self-stretch bg-[#F2F2F4] py-3 hover:bg-[#EDEDF0]'} ${overId === postedStatus.id ? 'bg-[#EDEDF0]' : ''}`}
           >
-            <button type="button" onClick={() => setPostedOpen(!postedOpen)} className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink" aria-expanded={postedOpen}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setPostedOpen(!postedOpen)
+              }}
+              className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink"
+              aria-expanded={postedOpen}
+              aria-label={postedOpen ? `Fold ${postedStatus.name}` : `Show ${postedStatus.name}, ${posted.length} items`}
+            >
               {postedOpen ? (
                 <>
                   <StatusPill status={postedStatus} /> {posted.length}
                 </>
               ) : (
-                <span className="[writing-mode:vertical-rl]">
+                <span className="text-sm font-semibold [writing-mode:vertical-rl]">
                   {postedStatus.name} · {posted.length}
                 </span>
               )}
@@ -158,6 +164,12 @@ function Board({ onNew }: { onNew: (preset: Partial<Item>) => void }) {
           </div>
         )}
       </div>
+
+      {cards.length === 0 && (
+        <div className="max-w-[760px]">
+          <EmptyState title="Nothing on your board yet" description="Add a post with + New content, or start one from your Idea bank. Each column is a step, and you can rename them with the “…” beside any step." />
+        </div>
+      )}
     </div>
   )
 }

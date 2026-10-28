@@ -89,7 +89,8 @@ export function DueText({ task, today, done }: { task: Task; today: string; done
 /* Status picker: a pill you click to change the status. The last item opens the stage editor. */
 
 // small: the pill inside a list row. Clicks stay in the pill so the row doesn't open.
-export function StatusPicker({ status, onPick, onEdit, options, small }: { status: Status; onPick: (id: string) => void; onEdit?: () => void; options?: Status[]; small?: boolean }) {
+// more: extra choices under the statuses, like Back to Idea bank.
+export function StatusPicker({ status, onPick, onEdit, options, small, more }: { status: Status; onPick: (id: string) => void; onEdit?: () => void; options?: Status[]; small?: boolean; more?: { label: string; onClick: () => void }[] }) {
   const tasksApi = useTasks()
   const statuses = options ?? tasksApi.statuses
   return (
@@ -130,6 +131,22 @@ export function StatusPicker({ status, onPick, onEdit, options, small }: { statu
                 <StatusPill status={s} />
               </MenuItem>
             ))}
+            {more && more.length > 0 && (
+              <>
+                <div className="my-1 border-t border-divider" />
+                {more.map((m) => (
+                  <MenuItem
+                    key={m.label}
+                    onClick={() => {
+                      close()
+                      m.onClick()
+                    }}
+                  >
+                    {m.label}
+                  </MenuItem>
+                ))}
+              </>
+            )}
             {onEdit && (
               <>
                 <div className="my-1 border-t border-divider" />

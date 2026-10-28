@@ -1,4 +1,4 @@
-import { useState, type DragEvent, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ContentMenu, PlatformChips, platformLine, pointFrom, Tick, type MenuPoint } from '../components/contentParts'
 import { Button, MenuItem, Popover, Switch } from '../components/ui'
@@ -22,15 +22,29 @@ const HOUR_PX = 52
 const hourOf = (t: string) => Number(t.slice(0, 2)) + Number(t.slice(3, 5)) / 60
 const hourLabel = (h: number) => `${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`
 
+type WeekStart = 'today' | 'sunday' | 'monday'
+const weekStartInfo: Record<WeekStart, string> = { today: 'Today', sunday: 'Sunday', monday: 'Monday' }
+
+// The first day of the week that holds `date`, by your choice of start.
+const weekOf = (date: string, start: WeekStart) => (start === 'today' ? date : addDays(date, -((weekdayOf(date) - (start === 'sunday' ? 0 : 1) + 7) % 7)))
+const monthTitle = (month: string) => `${new Date(`${month}-01T00:00:00Z`).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${month.slice(0, 4)}`
+const shiftMonth = (month: string, n: number) => {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7)
+}
+
 export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Content>) => void }) {
   const api = useContent()
   const { cards, ideas, platforms, today, isPosted, updateContent, firstStatus, campaigns } = api
   const { workspace } = useWorkspace()
   const [view, setView] = useState<View>(() => readPref('odessi:content:calView', 'month'))
   const [layout, setLayout] = useState<Layout>(() => readPref('odessi:content:calLayout', 'timed'))
-  const [anchor, setAnchor] = useState(today)
+  const [weekStart, setWeekStart] = useState<WeekStart>(() => readPref('odessi:content:weekStart', 'today'))
+  const [anchor, setAnchor] = useState(() => weekOf(today, weekStart))
+  const [month, setMonth] = useState(today.slice(0, 7))
   const [platformsOn, setPlatformsOn] = useState<string[]>([])
   const [filters, setFilters] = useState<Filters>(noFilters)
+  const scroller = useRef<HTMLDivElement>(null)
 
   const pass = (c: Content) =>
     (platformsOn.length === 0 || c.platform_ids.some((id) => platformsOn.includes(id))) &&
@@ -41,28 +55,57 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
   const shown = cards.filter(pass)
   const spotPlatforms = (p: Platform) => platformsOn.length === 0 || platformsOn.includes(p.id)
 
-  // Month: the grid of weeks around the month you're on. Week: seven days starting on the day you're on (today, at first).
-  const month = anchor.slice(0, 7)
-  const weekStartDay = workspace?.week_start === 'sunday' ? 0 : 1
-  let days: string[]
-  if (view === 'month') {
-    const first = `${month}-01`
-    const start = addDays(first, -((weekdayOf(first) - weekStartDay + 7) % 7))
-    const [y, m] = month.split('-').map(Number)
-    const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
-    const weeks = Math.ceil((diffDays(last, start) + 1) / 7)
-    days = Array.from({ length: weeks * 7 }, (_, i) => addDays(start, i))
-  } else days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i))
+  // Month: one long scroll of weeks, from six months back to a year ahead. Week: seven days from the start you chose.
+  const monthWeekStart: WeekStart = workspace?.week_start === 'sunday' ? 'sunday' : 'monday'
+  const days = useMemo(() => {
+    if (view === 'week') return Array.from({ length: 7 }, (_, i) => addDays(anchor, i))
+    const start = weekOf(`${shiftMonth(today.slice(0, 7), -6)}-01`, monthWeekStart)
+    const end = `${shiftMonth(today.slice(0, 7), 13)}-01`
+    const weeks = Math.ceil((diffDays(end, start) + 1) / 7)
+    return Array.from({ length: weeks * 7 }, (_, i) => addDays(start, i))
+  }, [view, anchor, today, monthWeekStart])
   const spots = api.openSpots(days[0], days[days.length - 1], cards).filter((s) => spotPlatforms(s.platform))
+
+  // Scroll the month so the week holding `date` sits at the top.
+  const jump = useCallback(
+    (date: string, smooth = true) => {
+      const box = scroller.current
+      const row = box?.querySelector<HTMLElement>(`[data-week="${weekOf(date, monthWeekStart)}"]`)
+      if (box && row) box.scrollTo({ top: row.offsetTop - 34, behavior: smooth ? 'smooth' : 'auto' })
+    },
+    [monthWeekStart],
+  )
+  // Month opens at the top of this month.
+  useLayoutEffect(() => {
+    if (view === 'month') jump(`${today.slice(0, 7)}-01`, false)
+  }, [view, jump, today])
+  const onScroll = () => {
+    const box = scroller.current
+    if (!box) return
+    for (const r of box.querySelectorAll<HTMLElement>('[data-week]')) {
+      if (r.offsetTop + r.offsetHeight / 2 > box.scrollTop + 34) {
+        // A week that holds the 1st belongs to the new month, so go by its last day.
+        const mid = addDays(r.dataset.week!, 6).slice(0, 7)
+        if (mid !== month) setMonth(mid)
+        break
+      }
+    }
+  }
 
   const shift = (n: number) => {
     if (view === 'week') return setAnchor(addDays(anchor, 7 * n))
-    const [y, m] = month.split('-').map(Number)
-    setAnchor(new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 10))
+    const target = shiftMonth(month, n)
+    setMonth(target)
+    jump(`${target}-01`)
+  }
+  const goToday = () => {
+    if (view === 'week') return setAnchor(weekOf(today, weekStart))
+    setMonth(today.slice(0, 7))
+    jump(today)
   }
   const title =
     view === 'month'
-      ? `${new Date(`${month}-01T00:00:00Z`).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${month.slice(0, 4)}`
+      ? monthTitle(month)
       : (() => {
           const a = days[0]
           const b = days[6]
@@ -81,7 +124,7 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
       ...(c.is_idea && date ? { is_idea: false, status_id: firstStatus?.id ?? null } : {}),
     })
   }
-  const onSpot = (s: OpenSpot) => onNew({ platform_ids: [s.platform.id], publish_date: s.date, publish_time: s.platform.usual_time })
+  const onSpot = (s: OpenSpot) => onNew({ platform_ids: [s.platform.id], publish_date: s.date, publish_time: s.time })
   const unscheduled = cards.filter((c) => !c.publish_date && !isPosted(c) && pass(c))
   const filterCount = filters.statuses.length + (filters.pillar ? 1 : 0) + (filters.group ? 1 : 0) + (filters.hidePosted ? 1 : 0)
 
@@ -99,7 +142,7 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
           </button>
         </div>
         <h2 className="min-w-40 text-base font-semibold">{title}</h2>
-        <Button size="sm" onClick={() => setAnchor(today)}>
+        <Button size="sm" onClick={goToday}>
           Today
         </Button>
         <div className="ml-2 flex rounded-[10px] bg-[#EDEDF0] p-0.5" role="tablist" aria-label="Calendar view">
@@ -120,13 +163,41 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
           ))}
         </div>
         {view === 'week' && (
-          <LayoutMenu
-            value={layout}
-            onChange={(l) => {
-              setLayout(l)
-              savePref('odessi:content:calLayout', l)
-            }}
-          />
+          <>
+            <Popover
+              trigger={({ toggle, open }) => (
+                <button type="button" aria-expanded={open} onClick={toggle} className="h-[34px] rounded-lg border-[1.5px] border-field bg-surface px-3 text-[13px] font-semibold hover:bg-divider">
+                  <span className="font-normal text-muted">Starts:</span> {weekStartInfo[weekStart]} ▾
+                </button>
+              )}
+            >
+              {(close) => (
+                <div className="w-48">
+                  {(Object.keys(weekStartInfo) as WeekStart[]).map((w) => (
+                    <MenuItem
+                      key={w}
+                      selected={w === weekStart}
+                      onClick={() => {
+                        close()
+                        setWeekStart(w)
+                        savePref('odessi:content:weekStart', w)
+                        setAnchor(weekOf(today, w))
+                      }}
+                    >
+                      {weekStartInfo[w]}
+                    </MenuItem>
+                  ))}
+                </div>
+              )}
+            </Popover>
+            <LayoutMenu
+              value={layout}
+              onChange={(l) => {
+                setLayout(l)
+                savePref('odessi:content:calLayout', l)
+              }}
+            />
+          </>
         )}
         <FilterButton value={filters} onChange={setFilters} count={filterCount} />
       </div>
@@ -137,7 +208,7 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)_236px] items-start gap-5">
-        <div className="min-w-0">{view === 'month' ? <MonthGrid {...ctx} month={month} /> : layout === 'timed' ? <TimedWeek {...ctx} /> : <SimpleWeek {...ctx} />}</div>
+        <div className="min-w-0">{view === 'month' ? <MonthGrid {...ctx} month={month} scroller={scroller} onScroll={onScroll} /> : layout === 'timed' ? <TimedWeek {...ctx} /> : <SimpleWeek {...ctx} />}</div>
         <Tray items={unscheduled} ideas={ideas.slice(-4).reverse()} onDrop={(id) => schedule(id, null)} />
       </div>
     </div>
@@ -157,7 +228,7 @@ function RhythmLine({ platforms }: { platforms: Platform[] }) {
     <span className="text-[13px] text-muted">
       {set.length ? (
         <>
-          Rhythm: {set.map((p) => `${p.name} ${days(p)}`).join(' · ')} ·{' '}
+          Rhythm: {set.map((p) => `${p.name} ${days(p)}${p.times.length > 1 ? ` (${p.times.length} a day)` : ''}`).join(' · ')} ·{' '}
         </>
       ) : (
         'No posting rhythm yet. Set one and empty days show as open spots. '
@@ -370,6 +441,7 @@ function Spot({ s, onSpot }: { s: OpenSpot; onSpot: (s: OpenSpot) => void }) {
       className="w-full rounded-lg border-[1.5px] border-dashed border-field px-2 py-1 text-left text-[11px] font-medium text-muted hover:border-accent hover:bg-hover hover:text-accent"
     >
       + {s.platform.name}
+      {s.time && <span className="font-normal opacity-80"> · {formatTime(s.time).replace(':00', '')}</span>}
     </button>
   )
 }
@@ -420,23 +492,29 @@ function Bands({ days, campaigns }: { days: string[]; campaigns: Campaign[] }) {
   )
 }
 
-function DayCell({ date, today, faded, onDrop, onSpot, children, className = '' }: { date: string; today: string; faded?: boolean; onDrop: (id: string) => void; onSpot?: () => void; children: ReactNode; className?: string }) {
+function DayCell({ date, today, faded, onDrop, children, className = '' }: { date: string; today: string; faded?: boolean; onDrop: (id: string) => void; children: ReactNode; className?: string }) {
   const { over, props } = useDrop(onDrop)
   const isToday = date === today
+  const first = date.endsWith('-01')
   return (
-    <div {...props} className={`flex min-w-0 flex-col gap-1 border-divider p-1.5 ${over ? 'bg-accent-tint' : date < today ? 'bg-[#FBFBFC]' : 'bg-surface'} ${className}`} onDoubleClick={onSpot}>
-      <span className={`flex size-6 items-center justify-center self-start rounded-full text-xs font-semibold ${isToday ? 'bg-accent text-white' : faded ? 'text-[#B5B5BC]' : 'text-muted'}`}>{Number(date.slice(8))}</span>
+    <div {...props} className={`flex min-w-0 flex-col gap-1 border-divider p-1.5 ${over ? 'bg-accent-tint' : date < today ? 'bg-[#FBFBFC]' : 'bg-surface'} ${className}`}>
+      <span className={`flex h-6 items-center self-start rounded-full text-xs font-semibold ${isToday ? 'min-w-6 justify-center bg-accent px-1.5 text-white' : faded ? 'px-1 text-[#B5B5BC]' : 'px-1 text-muted'}`}>
+        {first ? `${monthNames[Number(date.slice(5, 7)) - 1]} 1` : Number(date.slice(8))}
+      </span>
       {children}
     </div>
   )
 }
 
-function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, month }: GridProps & { month: string }) {
+// Days are square while there's room, and stop growing at a calm height so a month fits on screen. Busy days grow to fit.
+const cellHeight = 'min-h-[clamp(96px,calc(100cqw/7),150px)]'
+
+function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, month, scroller, onScroll }: GridProps & { month: string; scroller: RefObject<HTMLDivElement>; onScroll: () => void }) {
   const weeks = Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7))
   const labels = days.slice(0, 7).map((d) => weekdayNames[weekdayOf(d)].slice(0, 3))
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-card">
-      <div className="grid grid-cols-7 border-b border-divider">
+    <div ref={scroller} onScroll={onScroll} className="relative h-[calc(100vh-210px)] min-h-[480px] overflow-y-auto rounded-2xl border border-border bg-surface shadow-card [container-type:inline-size]">
+      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-divider bg-surface">
         {labels.map((l) => (
           <span key={l} className="px-2 py-2 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
             {l}
@@ -444,13 +522,13 @@ function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, mon
         ))}
       </div>
       {weeks.map((week) => (
-        <div key={week[0]} className="border-divider [&+&]:border-t">
-          <div className="pt-1.5">
+        <div key={week[0]} data-week={week[0]} className="border-divider [&+&]:border-t">
+          <div className="pt-1">
             <Bands days={week} campaigns={campaigns} />
           </div>
           <div className="grid grid-cols-7">
             {week.map((d) => (
-              <DayCell key={d} date={d} today={today} faded={!d.startsWith(month)} onDrop={(id) => schedule(id, d)} className="min-h-[118px] [&+&]:border-l">
+              <DayCell key={d} date={d} today={today} faded={!d.startsWith(month)} onDrop={(id) => schedule(id, d)} className={`${cellHeight} [&+&]:border-l`}>
                 {shown
                   .filter((c) => c.publish_date === d)
                   .sort((a, b) => (a.publish_time ?? '').localeCompare(b.publish_time ?? ''))
@@ -460,7 +538,7 @@ function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, mon
                 {spots
                   .filter((s) => s.date === d)
                   .map((s) => (
-                    <Spot key={s.platform.id} s={s} onSpot={onSpot} />
+                    <Spot key={s.key} s={s} onSpot={onSpot} />
                   ))}
               </DayCell>
             ))}
@@ -505,7 +583,7 @@ function SimpleWeek({ days, shown, spots, today, onSpot, schedule, campaigns }: 
             {spots
               .filter((s) => s.date === d)
               .map((s) => (
-                <Spot key={s.platform.id} s={s} onSpot={onSpot} />
+                <Spot key={s.key} s={s} onSpot={onSpot} />
               ))}
           </DayCell>
         ))}
@@ -521,17 +599,22 @@ function HourSlot({ date, hour, schedule }: { date: string; hour: number; schedu
 
 function TimedWeek({ days, shown, spots, today, onSpot, schedule, campaigns }: GridProps) {
   const timed = shown.filter((c) => c.publish_time && days.includes(c.publish_date ?? ''))
-  const timedSpots = spots.filter((s) => s.platform.usual_time)
-  const hours = [...timed.map((c) => hourOf(c.publish_time!)), ...timedSpots.map((s) => hourOf(s.platform.usual_time!))]
-  const first = Math.min(8, ...hours.map(Math.floor))
-  const last = Math.max(17, ...hours.map((h) => Math.ceil(h + 0.5)))
-  const rows = Array.from({ length: last - first + 1 }, (_, i) => first + i)
-  const top = (t: string) => (hourOf(t) - first) * HOUR_PX + 2
+  const timedSpots = spots.filter((s) => s.time)
+  const hours = [...timed.map((c) => hourOf(c.publish_time!)), ...timedSpots.map((s) => hourOf(s.time!))]
+  const rows = Array.from({ length: 24 }, (_, i) => i)
+  const top = (t: string) => hourOf(t) * HOUR_PX + 2
   const untimed = (d: string) => shown.filter((c) => c.publish_date === d && !c.publish_time)
-  const anyTime = days.some((d) => untimed(d).length || spots.some((s) => s.date === d && !s.platform.usual_time))
+  const anyTime = days.some((d) => untimed(d).length || spots.some((s) => s.date === d && !s.time))
+  // The day scrolls through all 24 hours. It opens at 8 AM, or earlier if something is planned before then.
+  const box = useRef<HTMLDivElement>(null)
+  const startHour = Math.min(8, ...hours.map(Math.floor))
+  const first = days[0]
+  useLayoutEffect(() => {
+    if (box.current) box.current.scrollTop = Math.max(0, startHour - 0.4) * HOUR_PX
+  }, [startHour, first])
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-card">
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-card">
       <div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] border-b border-divider">
         <span />
         <WeekHead days={days} today={today} />
@@ -549,43 +632,45 @@ function TimedWeek({ days, shown, spots, today, onSpot, schedule, campaigns }: G
                 <CalItem key={c.id} c={c} />
               ))}
               {spots
-                .filter((s) => s.date === d && !s.platform.usual_time)
+                .filter((s) => s.date === d && !s.time)
                 .map((s) => (
-                  <Spot key={s.platform.id} s={s} onSpot={onSpot} />
+                  <Spot key={s.key} s={s} onSpot={onSpot} />
                 ))}
             </DayCell>
           ))}
         </div>
       )}
-      <div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))]">
-        <div>
-          {rows.map((h) => (
-            <div key={h} className="pr-2 text-right text-[11px] text-faint" style={{ height: HOUR_PX }}>
-              <span className="relative -top-1.5">{hourLabel(h)}</span>
+      <div ref={box} className="h-[calc(100vh-340px)] min-h-[400px] overflow-y-auto">
+        <div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))]">
+          <div>
+            {rows.map((h) => (
+              <div key={h} className="pr-2 text-right text-[11px] text-faint" style={{ height: HOUR_PX }}>
+                {h > 0 && <span className="relative -top-1.5">{hourLabel(h)}</span>}
+              </div>
+            ))}
+          </div>
+          {days.map((d) => (
+            <div key={d} className={`relative border-l border-divider ${d < today ? 'bg-[#FBFBFC]' : ''}`}>
+              {rows.map((h) => (
+                <HourSlot key={h} date={d} hour={h} schedule={schedule} />
+              ))}
+              {timed
+                .filter((c) => c.publish_date === d)
+                .map((c) => (
+                  <div key={c.id} className="absolute right-1 left-1" style={{ top: top(c.publish_time!) }}>
+                    <CalItem c={c} />
+                  </div>
+                ))}
+              {timedSpots
+                .filter((s) => s.date === d)
+                .map((s) => (
+                  <div key={s.key} className="absolute right-1 left-1" style={{ top: top(s.time!) }}>
+                    <Spot s={s} onSpot={onSpot} />
+                  </div>
+                ))}
             </div>
           ))}
         </div>
-        {days.map((d) => (
-          <div key={d} className={`relative border-l border-divider ${d < today ? 'bg-[#FBFBFC]' : ''}`}>
-            {rows.map((h) => (
-              <HourSlot key={h} date={d} hour={h} schedule={schedule} />
-            ))}
-            {timed
-              .filter((c) => c.publish_date === d)
-              .map((c) => (
-                <div key={c.id} className="absolute right-1 left-1" style={{ top: top(c.publish_time!) }}>
-                  <CalItem c={c} />
-                </div>
-              ))}
-            {timedSpots
-              .filter((s) => s.date === d)
-              .map((s) => (
-                <div key={s.platform.id} className="absolute right-1 left-1" style={{ top: top(s.platform.usual_time!) }}>
-                  <Spot s={s} onSpot={onSpot} />
-                </div>
-              ))}
-          </div>
-        ))}
       </div>
     </div>
   )
