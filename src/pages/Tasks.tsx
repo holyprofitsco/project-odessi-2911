@@ -599,6 +599,7 @@ function TaskRow({
   const { projects } = useProjects()
   const { waitingName, clientFor } = useClientInfo()
   const [menu, setMenu] = useState<MenuPoint | null>(null)
+  const navigate = useNavigate()
   const status = statusById(task.status_id)
   if (!status) return null
   const who = waitingName(task)
@@ -610,7 +611,6 @@ function TaskRow({
   const blocker = done ? undefined : blockersOf(task.id).find((b) => !['done', 'canceled'].includes(statusById(b.status_id)?.behavior ?? ''))
   const waitingLine = status.behavior === 'waiting' ? `Waiting${who ? ` on ${who}` : ''} since ${since}` : null
   const project = showProject ? projects.find((p) => p.id === task.project_id) : undefined
-  const context = [client?.name, project?.name].filter(Boolean).join(' · ')
 
   return (
     <>
@@ -649,9 +649,27 @@ function TaskRow({
         <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={() => onToggle(task)} />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
-          {(waitingLine || blocker || subs.length > 0 || task.repeat_rule || context) && (
+          {(waitingLine || blocker || subs.length > 0 || task.repeat_rule || client || project) && (
             <span className="flex items-center gap-2 text-xs text-faint">
-              {context && <span className="shrink-0 truncate text-muted">{context}</span>}
+              {(client || project) && (
+              <span className="shrink-0 truncate text-muted">
+                {client?.name}
+                {client && project && ' · '}
+                {/* The project name goes straight to the project. */}
+                {project && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/projects/${project.id}`)
+                    }}
+                    className="hover:text-ink hover:underline"
+                  >
+                    {project.name || 'Untitled project'}
+                  </button>
+                )}
+              </span>
+            )}
               {blocker && !waitingLine && <span className="truncate text-waiting">Can't start until {blocker.title}</span>}
               {waitingLine && (
                 <span className="truncate text-waiting" title={waitingLine}>

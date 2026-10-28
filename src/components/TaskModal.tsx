@@ -66,6 +66,7 @@ function Inner(p: InnerProps) {
   const { tasks, statuses, statusById, today, updateTask, setStatus, deleteTask, duplicateTask, addTask, firstOpenStatus, changeDue } = useTasks()
   const { projects, phases, milestones } = useProjects()
   const project = projects.find((x) => x.id === task.project_id)
+  const navigate = useNavigate()
   const phase = phases.find((x) => x.id === task.phase_id)
   const milestone = milestones.find((x) => x.id === task.milestone_id)
   const crumb = project ? [project.name || 'Untitled project', project.layout === 'phases' ? phase?.name : project.layout === 'milestones' ? milestone?.name : null].filter(Boolean).join(' · ') : 'Tasks'
@@ -224,6 +225,18 @@ function Inner(p: InnerProps) {
             {!task.parent_task_id && workspace.areas_on.projects !== false && (
               <Field label="Project">
                 <ProjectPicker value={task.project_id} onPick={(project_id) => updateTask(task.id, { project_id, phase_id: null, milestone_id: null })} />
+                {project && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      p.onClose()
+                      navigate(`/projects/${project.id}`)
+                    }}
+                    className="rounded-md px-1.5 py-1 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink"
+                  >
+                    Open project ›
+                  </button>
+                )}
                 {project?.layout === 'phases' && (
                   <GroupPick
                     label="Phase"
