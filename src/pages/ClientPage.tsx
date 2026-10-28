@@ -274,6 +274,7 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
   const { tasksFor } = useClientInfo()
   const [showDone, setShowDone] = useState(false)
   const [draft, setDraft] = useState('')
+  const [typing, setTyping] = useState(false)
   const all = tasksFor(client).sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'))
   const open = all.filter((t) => statusById(t.status_id)?.behavior !== 'done')
   const done = all.filter((t) => statusById(t.status_id)?.behavior === 'done')
@@ -292,9 +293,8 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
       <div className="flex items-center gap-2 px-1">
         <span className={sectionTitle}>Open tasks</span>
         <span className="text-[13px] text-faint">{open.length}</span>
-        <div className="flex-1" />
         {done.length > 0 && (
-          <button type="button" onClick={() => setShowDone(!showDone)} className="text-[13px] font-medium text-muted hover:text-ink">
+          <button type="button" onClick={() => setShowDone(!showDone)} className="ml-2 rounded-md px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
             {showDone ? 'Hide done' : 'Show done'}
           </button>
         )}
@@ -303,16 +303,30 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
         {shown.map((t) => {
           return <ClientTaskRow key={t.id} task={t} onOpen={onOpen} />
         })}
-        <div className="flex items-center border-divider px-[18px] [&:not(:first-child)]:border-t">
-          <input
-            aria-label={`Add a task for ${client.name}`}
-            placeholder={`+ Add task for ${client.name || 'this client'}`}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && add()}
-            className="h-11 flex-1 bg-transparent text-[13px] font-medium placeholder:text-muted focus:outline-none"
-          />
-          <TaskLinker exclude={all.map((t) => t.id)} onPick={(id) => connect({ type: 'task', id }, { type: 'client', id: client.id })} />
+        <div className="flex min-h-11 items-center gap-1 border-divider px-[18px] [&:not(:first-child)]:border-t">
+          {typing ? (
+            <input
+              autoFocus
+              aria-label={`Add a task for ${client.name}`}
+              placeholder="Name the task, then press Enter"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => !draft.trim() && setTyping(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') add()
+                if (e.key === 'Escape') {
+                  setDraft('')
+                  setTyping(false)
+                }
+              }}
+              className="h-11 flex-1 bg-transparent text-sm placeholder:text-faint focus:outline-none"
+            />
+          ) : (
+            <button type="button" onClick={() => setTyping(true)} className="-ml-2 rounded-lg px-2 py-1.5 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
+              + Add task for {client.name || 'this client'}
+            </button>
+          )}
+          {!typing && <TaskLinker exclude={all.map((t) => t.id)} onPick={(id) => connect({ type: 'task', id }, { type: 'client', id: client.id })} />}
         </div>
       </Card>
     </div>
@@ -335,8 +349,7 @@ function ClientProjects({ client }: { client: Client }) {
       <div className="flex items-center gap-2 px-1">
         <span className={sectionTitle}>Projects</span>
         <span className="text-[13px] text-faint">{mine.length}</span>
-        <div className="flex-1" />
-        <button type="button" onClick={() => setFromTemplate(true)} className="text-[13px] font-medium text-muted hover:text-ink">
+        <button type="button" onClick={() => setFromTemplate(true)} className="ml-2 rounded-md px-2 py-0.5 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
           From a template…
         </button>
       </div>
@@ -447,9 +460,9 @@ function NotesSection({ client, onOpenTask }: { client: Client; onOpenTask: (id:
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center px-1">
+      {/* The button sits right by the title. Out at the far edge it gets missed on a wide screen. */}
+      <div className="flex items-center gap-3 px-1">
         <span className={sectionTitle}>Notes and activity</span>
-        <div className="flex-1" />
         {!open && (
           <Button size="sm" onClick={() => setOpen(true)}>
             + Log activity
