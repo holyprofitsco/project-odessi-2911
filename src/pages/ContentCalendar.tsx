@@ -92,6 +92,13 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
     }
   }
 
+  // "+N more" on a busy day opens that day's week.
+  const openWeek = (date: string) => {
+    setView('week')
+    savePref('odessi:content:calView', 'week')
+    setAnchor(weekOf(date, weekStart))
+  }
+
   const shift = (n: number) => {
     if (view === 'week') return setAnchor(addDays(anchor, 7 * n))
     const target = shiftMonth(month, n)
@@ -208,7 +215,7 @@ export default function ContentCalendar({ onNew }: { onNew: (preset: Partial<Con
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)_236px] items-start gap-5">
-        <div className="min-w-0">{view === 'month' ? <MonthGrid {...ctx} month={month} scroller={scroller} onScroll={onScroll} /> : layout === 'timed' ? <TimedWeek {...ctx} /> : <SimpleWeek {...ctx} />}</div>
+        <div className="min-w-0">{view === 'month' ? <MonthGrid {...ctx} month={month} scroller={scroller} onScroll={onScroll} onMore={openWeek} jump={jump} /> : layout === 'timed' ? <TimedWeek {...ctx} /> : <SimpleWeek {...ctx} />}</div>
         <Tray items={unscheduled} ideas={ideas.slice(-4).reverse()} onDrop={(id) => schedule(id, null)} />
       </div>
     </div>
@@ -388,7 +395,7 @@ type GridProps = {
   campaigns: Campaign[]
 }
 
-function CalItem({ c, big }: { c: Content; big?: boolean }) {
+function CalItem({ c, big, compact }: { c: Content; big?: boolean; compact?: boolean }) {
   const { platformsOf, statusById, isPosted, today } = useContent()
   const navigate = useNavigate()
   const [menu, setMenu] = useState<MenuPoint | null>(null)
@@ -413,7 +420,7 @@ function CalItem({ c, big }: { c: Content; big?: boolean }) {
         onContextMenu={(e) => setMenu(pointFrom(e))}
         onKeyDown={(e) => e.key === 'Enter' && open()}
         title={c.title}
-        className={`flex cursor-pointer flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left transition-shadow hover:shadow-[0_2px_8px_rgba(20,20,30,0.12)] ${posted ? 'opacity-70' : ''}`}
+        className={`flex shrink-0 cursor-pointer flex-col gap-0.5 rounded-lg px-2 text-left ${compact ? 'py-1' : 'py-1.5'} transition-shadow hover:shadow-[0_2px_8px_rgba(20,20,30,0.12)] ${posted ? 'opacity-70' : ''}`}
         style={{ background: status?.color_bg ?? '#F0F0EE', color: status?.color_text ?? '#666666' }}
       >
         <span className="flex items-center gap-1 text-[10px] font-semibold tracking-[0.03em] uppercase">
@@ -422,7 +429,7 @@ function CalItem({ c, big }: { c: Content; big?: boolean }) {
           {c.publish_time && <span className="font-medium normal-case opacity-80">· {formatTime(c.publish_time).replace(':00', '')}</span>}
           {late > 0 && <span className="ml-auto rounded bg-white/70 px-1 font-bold text-[#9A5530] normal-case">{late}d</span>}
         </span>
-        <span className={`text-xs leading-snug font-medium text-ink ${big ? 'line-clamp-3' : 'line-clamp-2'}`}>{c.title || 'Untitled'}</span>
+        <span className={`text-xs leading-snug font-medium text-ink ${big ? 'line-clamp-3' : compact ? 'line-clamp-1' : 'line-clamp-2'}`}>{c.title || 'Untitled'}</span>
       </div>
       {menu && <ContentMenu c={c} at={menu} onClose={() => setMenu(null)} onOpen={open} />}
     </>
@@ -438,7 +445,7 @@ function Spot({ s, onSpot }: { s: OpenSpot; onSpot: (s: OpenSpot) => void }) {
         e.stopPropagation()
         onSpot(s)
       }}
-      className="w-full rounded-lg border-[1.5px] border-dashed border-field px-2 py-1 text-left text-[11px] font-medium text-muted hover:border-accent hover:bg-hover hover:text-accent"
+      className="w-full shrink-0 truncate rounded-lg border-[1.5px] border-dashed border-field px-2 py-1 text-left whitespace-nowrap text-[11px] font-medium text-muted hover:border-accent hover:bg-hover hover:text-accent"
     >
       + {s.platform.name}
       {s.time && <span className="font-normal opacity-80"> · {formatTime(s.time).replace(':00', '')}</span>}
@@ -498,7 +505,7 @@ function DayCell({ date, today, faded, onDrop, children, className = '' }: { dat
   const first = date.endsWith('-01')
   return (
     <div {...props} className={`flex min-w-0 flex-col gap-1 border-divider p-1.5 ${over ? 'bg-accent-tint' : date < today ? 'bg-[#FBFBFC]' : 'bg-surface'} ${className}`}>
-      <span className={`flex h-6 items-center self-start rounded-full text-xs font-semibold ${isToday ? 'min-w-6 justify-center bg-accent px-1.5 text-white' : faded ? 'px-1 text-[#B5B5BC]' : 'px-1 text-muted'}`}>
+      <span className={`flex h-6 shrink-0 items-center self-start rounded-full text-xs font-semibold ${isToday ? 'min-w-6 justify-center bg-accent px-1.5 text-white' : faded ? 'px-1 text-[#B5B5BC]' : 'px-1 text-muted'}`}>
         {first ? `${monthNames[Number(date.slice(5, 7)) - 1]} 1` : Number(date.slice(8))}
       </span>
       {children}
@@ -506,45 +513,84 @@ function DayCell({ date, today, faded, onDrop, children, className = '' }: { dat
   )
 }
 
-// Days are square while there's room, and stop growing at a calm height so a month fits on screen. Busy days grow to fit.
-const cellHeight = 'min-h-[clamp(96px,calc(100cqw/7),150px)]'
+// Like Apple's month view: every week is the same height, five weeks fill the window, and the scroll settles on a whole week.
+const HEAD_PX = 34
+const WEEKS_SHOWN = 5
+const BAND_PX = 24
+const ITEM_PX = 46
+const SPOT_PX = 32
+const MORE_PX = 20
 
-function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, month, scroller, onScroll }: GridProps & { month: string; scroller: RefObject<HTMLDivElement>; onScroll: () => void }) {
+function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, month, scroller, onScroll, onMore, jump }: GridProps & { month: string; scroller: RefObject<HTMLDivElement>; onScroll: () => void; onMore: (date: string) => void; jump: (date: string, smooth?: boolean) => void }) {
   const weeks = Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7))
   const labels = days.slice(0, 7).map((d) => weekdayNames[weekdayOf(d)].slice(0, 3))
+  const [rowH, setRowH] = useState(() => Math.max(120, (window.innerHeight - 210 - HEAD_PX) / WEEKS_SHOWN))
+  const monthRef = useRef(month)
+  monthRef.current = month
+  useLayoutEffect(() => {
+    const box = scroller.current
+    if (!box) return
+    const ro = new ResizeObserver(() => setRowH(Math.max(120, Math.floor((box.clientHeight - HEAD_PX) / WEEKS_SHOWN))))
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [scroller])
+  // When the rows change size, stay on the month you were looking at.
+  useLayoutEffect(() => {
+    jump(`${monthRef.current}-01`, false)
+  }, [rowH, jump])
+
   return (
-    <div ref={scroller} onScroll={onScroll} className="relative h-[calc(100vh-210px)] min-h-[480px] overflow-y-auto rounded-2xl border border-border bg-surface shadow-card [container-type:inline-size]">
-      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-divider bg-surface">
+    <div
+      ref={scroller}
+      onScroll={onScroll}
+      style={{ scrollPaddingTop: HEAD_PX }}
+      className="relative h-[calc(100vh-210px)] min-h-[480px] snap-y snap-mandatory overflow-y-auto overscroll-contain rounded-2xl border border-border bg-surface shadow-card"
+    >
+      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-divider bg-surface" style={{ height: HEAD_PX }}>
         {labels.map((l) => (
-          <span key={l} className="px-2 py-2 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
+          <span key={l} className="flex items-center px-2 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
             {l}
           </span>
         ))}
       </div>
-      {weeks.map((week) => (
-        <div key={week[0]} data-week={week[0]} className="border-divider [&+&]:border-t">
-          <div className="pt-1">
-            <Bands days={week} campaigns={campaigns} />
+      {weeks.map((week) => {
+        const bands = campaigns.filter((c) => c.start_date && c.start_date <= week[6] && (c.end_date ?? c.start_date) >= week[0]).length
+        const room = rowH - 12 - 24 - (bands ? bands * BAND_PX + 4 : 0)
+        return (
+          <div key={week[0]} data-week={week[0]} className="relative snap-start overflow-hidden border-divider [&+&]:border-t" style={{ height: rowH }}>
+            <div className="grid h-full grid-cols-7">
+              {week.map((d) => {
+                const items = shown.filter((c) => c.publish_date === d).sort((a, b) => (a.publish_time ?? '').localeCompare(b.publish_time ?? ''))
+                const open = spots.filter((s) => s.date === d)
+                const all = [...items.map((c) => ({ h: ITEM_PX, el: <CalItem key={c.id} c={c} compact /> })), ...open.map((s) => ({ h: SPOT_PX, el: <Spot key={s.key} s={s} onSpot={onSpot} /> }))]
+                // Show what fits. If not everything does, leave room for "+N more".
+                let used = 0
+                let fit = all.length
+                if (all.reduce((n, x) => n + x.h, 0) > room) {
+                  fit = 0
+                  while (fit < all.length && used + all[fit].h + MORE_PX <= room) used += all[fit++].h
+                }
+                return (
+                  <DayCell key={d} date={d} today={today} faded={!d.startsWith(month)} onDrop={(id) => schedule(id, d)} className="overflow-hidden [&+&]:border-l">
+                    {bands > 0 && <span className="shrink-0" style={{ height: bands * BAND_PX }} />}
+                    {all.slice(0, fit).map((x) => x.el)}
+                    {fit < all.length && (
+                      <button type="button" onClick={() => onMore(d)} className="self-start rounded-md px-1.5 text-[11px] font-semibold text-muted hover:bg-hover hover:text-accent">
+                        {all.length - fit} more
+                      </button>
+                    )}
+                  </DayCell>
+                )
+              })}
+            </div>
+            {bands > 0 && (
+              <div className="pointer-events-none absolute inset-x-0 top-[34px]">
+                <Bands days={week} campaigns={campaigns} />
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-7">
-            {week.map((d) => (
-              <DayCell key={d} date={d} today={today} faded={!d.startsWith(month)} onDrop={(id) => schedule(id, d)} className={`${cellHeight} [&+&]:border-l`}>
-                {shown
-                  .filter((c) => c.publish_date === d)
-                  .sort((a, b) => (a.publish_time ?? '').localeCompare(b.publish_time ?? ''))
-                  .map((c) => (
-                    <CalItem key={c.id} c={c} />
-                  ))}
-                {spots
-                  .filter((s) => s.date === d)
-                  .map((s) => (
-                    <Spot key={s.key} s={s} onSpot={onSpot} />
-                  ))}
-              </DayCell>
-            ))}
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

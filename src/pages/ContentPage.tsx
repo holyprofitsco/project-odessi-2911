@@ -60,7 +60,7 @@ function ContentCard({ c }: { c: Content }) {
   }
 
   return (
-    <div className="flex max-w-[1180px] flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
       <div className="flex flex-col gap-2">
         <Link to="/content" className="w-fit text-[13px] text-muted hover:text-ink">
           ‹ Content
