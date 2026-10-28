@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ConnectionChip, ConnectPicker, InlineText, withHttp } from '../components/clientParts'
+import { DeleteProjectModal } from '../components/ContextMenu'
 import { DatePicker } from '../components/pickers'
 import { AddTaskLine, ClientSelect, OrderPicker, ProgressBar, ProjectColumnHeaders, ProjectTaskRow, SaveAsTaskSetModal, TaskSetMenu, TaskSetUseModal } from '../components/projectParts'
 import TaskModal from '../components/TaskModal'
@@ -48,13 +49,19 @@ export default function ProjectPage() {
 }
 
 // A group of tasks on the page: a phase, a milestone, or the one list. Tasks remember which field puts them here.
-type Group = { key: string; field: 'phase_id' | 'milestone_id' | null; value: string | null; inOrder: boolean; tasks: Task[] }
+type Group = {
+  key: string
+  field: 'phase_id' | 'milestone_id' | null
+  value: string | null
+  inOrder: boolean
+  tasks: Task[]
+}
 
 function Page({ project }: { project: Project }) {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const api = useProjects()
-  const { statuses, statusById, updateProject, setProjectStatus, deleteProject, duplicateProject, progress, tasksOf, phases, milestones, addTemplate, planFromProject } = api
+  const { statuses, statusById, updateProject, setProjectStatus, duplicateProject, progress, tasksOf, phases, milestones, addTemplate, planFromProject } = api
   const tasksApi = useTasks()
   const { setOrder, updateTask } = tasksApi
   const [editingStages, setEditingStages] = useState(false)
@@ -82,8 +89,15 @@ function Page({ project }: { project: Project }) {
   }
 
   const saveAsTemplate = async () => {
-    const { groups, countFrom } = planFromProject(project)
-    const t = await addTemplate({ name: project.name || 'New template', description: project.about.slice(0, 120), layout: project.layout, count_from: countFrom, groups })
+    const { groups, countFrom, bigDay } = planFromProject(project)
+    const t = await addTemplate({
+      name: project.name || 'New template',
+      description: project.about.slice(0, 120),
+      layout: project.layout,
+      count_from: countFrom,
+      big_day: bigDay,
+      groups,
+    })
     if (t) navigate(`/projects/templates/${t.id}`)
   }
 
@@ -158,7 +172,13 @@ function Page({ project }: { project: Project }) {
           {project.layout === 'list' && (
             <GroupCard
               project={project}
-              group={{ key: 'list', field: null, value: null, inOrder: project.list_in_order, tasks: own }}
+              group={{
+                key: 'list',
+                field: null,
+                value: null,
+                inOrder: project.list_in_order,
+                tasks: own,
+              }}
               hideDone={hideDone}
               dragId={dragId}
               setDragId={setDragId}
@@ -176,38 +196,16 @@ function Page({ project }: { project: Project }) {
           <AboutSection project={project} />
           <ConnectedSection project={project} />
           <LinksSection project={project} />
+          {/* Tucked at the bottom so it's findable without competing with the work. */}
+          <button type="button" onClick={() => setConfirmDelete(true)} className="-mb-1 w-fit text-xs text-faint hover:text-[#A4574E] hover:underline">
+            Delete project
+          </button>
         </Card>
       </div>
 
       <StatusEditor open={editingStages} onClose={() => setEditingStages(false)} api={api} />
       {taskId && <TaskModal taskId={taskId} onClose={() => setParams({})} />}
-      <Modal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={`Delete ${project.name || 'this project'}?`}
-        footer={
-          <>
-            <span className="text-xs text-faint">This can’t be undone</span>
-            <div className="flex gap-2">
-              <Button onClick={() => setConfirmDelete(false)}>Keep it</Button>
-              <Button
-                variant="danger"
-                onClick={async () => {
-                  setConfirmDelete(false)
-                  navigate('/projects')
-                  await deleteProject(project.id)
-                }}
-              >
-                Delete
-              </Button>
-            </div>
-          </>
-        }
-      >
-        <p className="text-sm text-muted">
-          Its {own.length} {own.length === 1 ? 'task goes' : 'tasks go'} too. If it’s only finished, set it to {statuses.find((s) => s.behavior === 'done')?.name ?? 'Done'} instead.
-        </p>
-      </Modal>
+      {confirmDelete && <DeleteProjectModal project={project} onClose={() => setConfirmDelete(false)} onDeleted={() => navigate('/projects')} />}
     </div>
   )
 }
@@ -250,7 +248,13 @@ function LayoutMenu({ value, onChange }: { value: Layout; onChange: (l: Layout) 
 
 /* One card of tasks: header (for phases and milestones), rows, done tasks folded, and + Add task. */
 
-type DragProps = { dragId: string | null; setDragId: (id: string | null) => void; moveTask: (g: Group, beforeId: string | null) => void; onOpen: (id: string) => void; hideDone: boolean }
+type DragProps = {
+  dragId: string | null
+  setDragId: (id: string | null) => void
+  moveTask: (g: Group, beforeId: string | null) => void
+  onOpen: (id: string) => void
+  hideDone: boolean
+}
 
 function GroupCard({
   project,
@@ -284,7 +288,10 @@ function GroupCard({
   const shownOpen = alwaysOpen || open
   const visible = drag.hideDone ? group.tasks.filter((t) => !isDone(t)) : group.tasks
   const doneOnes = drag.hideDone ? group.tasks.filter(isDone) : []
-  const extra: Partial<Task> = { project_id: project.id, ...(group.field ? { [group.field]: group.value } : {}) }
+  const extra: Partial<Task> = {
+    project_id: project.id,
+    ...(group.field ? { [group.field]: group.value } : {}),
+  }
 
   const add = async (title: string) => {
     const last = group.tasks.reduce((n, t) => Math.max(n, t.order_in_group), 0)
@@ -414,7 +421,13 @@ function PhasesLayout({ project, phases, own, ...drag }: DragProps & { project: 
           <GroupCard
             key={ph.id}
             project={project}
-            group={{ key: ph.id, field: 'phase_id', value: ph.id, inOrder: ph.in_order, tasks: list }}
+            group={{
+              key: ph.id,
+              field: 'phase_id',
+              value: ph.id,
+              inOrder: ph.in_order,
+              tasks: list,
+            }}
             defaultOpen={state !== 'done'}
             addLabel={`Add task to ${ph.name || 'this phase'}`}
             onInOrder={(v) => updatePhase(ph.id, { in_order: v })}
@@ -447,7 +460,13 @@ function PhasesLayout({ project, phases, own, ...drag }: DragProps & { project: 
       {loose.length > 0 && (
         <GroupCard
           project={project}
-          group={{ key: 'none', field: 'phase_id', value: null, inOrder: false, tasks: loose }}
+          group={{
+            key: 'none',
+            field: 'phase_id',
+            value: null,
+            inOrder: false,
+            tasks: loose,
+          }}
           addLabel="Add task"
           {...drag}
           header={({ open, toggle, menu }) => (
@@ -572,7 +591,13 @@ function MilestonesLayout({ project, milestones, own, ...drag }: DragProps & { p
           <GroupCard
             key={m.id}
             project={project}
-            group={{ key: m.id, field: 'milestone_id', value: m.id, inOrder: m.in_order, tasks: list }}
+            group={{
+              key: m.id,
+              field: 'milestone_id',
+              value: m.id,
+              inOrder: m.in_order,
+              tasks: list,
+            }}
             defaultOpen={state !== 'hit'}
             addLabel={`Add task to ${m.name || 'this milestone'}`}
             onInOrder={(v) => updateMilestone(m.id, { in_order: v })}
@@ -603,7 +628,13 @@ function MilestonesLayout({ project, milestones, own, ...drag }: DragProps & { p
       {loose.length > 0 && (
         <GroupCard
           project={project}
-          group={{ key: 'none', field: 'milestone_id', value: null, inOrder: false, tasks: loose }}
+          group={{
+            key: 'none',
+            field: 'milestone_id',
+            value: null,
+            inOrder: false,
+            tasks: loose,
+          }}
           addLabel="Add task"
           {...drag}
           header={({ open, toggle, menu }) => (
@@ -684,7 +715,14 @@ function Timeline({ project, milestones, hit, today }: { project: Project; miles
           const size = big ? 16 : 11
           return (
             <span key={m.id} className="absolute flex -translate-x-1/2 flex-col items-center gap-1" style={{ left: at(m.date!), top: 36 - size / 2 }} title={`${m.name} · ${shortDate(m.date!, today)}`}>
-              <span className="rounded-full border-2 border-accent" style={{ width: size, height: size, background: h ? '#8C6A80' : '#fff' }} />
+              <span
+                className="rounded-full border-2 border-accent"
+                style={{
+                  width: size,
+                  height: size,
+                  background: h ? '#8C6A80' : '#fff',
+                }}
+              />
               <span className="max-w-28 truncate rounded bg-surface px-1 text-[11px] font-medium whitespace-nowrap">{m.name}</span>
               <span className="rounded bg-surface px-1 text-[10px] text-muted">{shortDate(m.date!, today)}</span>
             </span>
@@ -731,7 +769,12 @@ function DetailsSection({ project }: { project: Project }) {
             { value: 'client', label: 'Client work' },
             { value: 'mine', label: 'My business' },
           ]}
-          onChange={(kind) => updateProject(project.id, { kind, ...(kind === 'mine' ? { client_id: null } : {}) })}
+          onChange={(kind) =>
+            updateProject(project.id, {
+              kind,
+              ...(kind === 'mine' ? { client_id: null } : {}),
+            })
+          }
         />
       </InfoRow>
       {project.kind === 'client' && (
@@ -750,8 +793,8 @@ function DetailsSection({ project }: { project: Project }) {
         <DatePicker quiet label="Project starts" value={project.start_date} today={today} weekStart={workspace?.week_start} onChange={(start_date) => updateProject(project.id, { start_date })} />
       </InfoRow>
       {project.layout === 'milestones' ? (
-        <InfoRow label="Launch day">
-          <DatePicker quiet label="Launch day" value={project.launch_date} today={today} weekStart={workspace?.week_start} onChange={(launch_date) => updateProject(project.id, { launch_date })} />
+        <InfoRow label={project.big_day || 'Launch day'}>
+          <DatePicker quiet label={project.big_day || 'Launch day'} value={project.launch_date} today={today} weekStart={workspace?.week_start} onChange={(launch_date) => updateProject(project.id, { launch_date })} />
         </InfoRow>
       ) : null}
       <InfoRow label="Due">
@@ -779,6 +822,7 @@ function AboutSection({ project }: { project: Project }) {
   )
 }
 
+/* The project's client lives in Details, so this side only holds the people involved. */
 function ConnectedSection({ project }: { project: Project }) {
   const { connections, clients, people, connect, disconnect } = useClients()
   const navigate = useNavigate()
@@ -786,14 +830,21 @@ function ConnectedSection({ project }: { project: Project }) {
     .filter((c) => c.from_id === project.id || c.to_id === project.id)
     .map((c) => {
       const otherId = c.from_id === project.id ? c.to_id : c.from_id
-      const other = clients.find((x) => x.id === otherId)
       const person = people.find((p) => p.id === otherId)
+      const other = person ? null : clients.find((x) => x.id === otherId)
       const owner = person ? clients.find((x) => x.id === person.client_id) : other
-      return { c, name: other?.name ?? person?.name ?? '', business: other?.kind === 'business', go: owner ? `/clients/${owner.id}${person ? `?person=${person.id}` : ''}` : null }
+      return {
+        c,
+        otherId,
+        name: person?.name ?? other?.name ?? '',
+        business: other?.kind === 'business',
+        go: owner ? `/clients/${owner.id}${person ? `?person=${person.id}` : ''}` : null,
+      }
     })
-    .filter((x) => x.go)
+    // Older projects may be connected to their own client; Details already shows it.
+    .filter((x) => x.go && x.otherId !== project.client_id)
   return (
-    <SideSection title="Connected to">
+    <SideSection title="Related contacts">
       {mine.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {mine.map(({ c, name, business, go }) => (
@@ -801,10 +852,10 @@ function ConnectedSection({ project }: { project: Project }) {
           ))}
         </div>
       )}
-      <ConnectPicker exclude={mine.map((x) => (x.c.from_id === project.id ? x.c.to_id : x.c.from_id))} onPick={(item) => connect({ type: 'project', id: project.id }, item)}>
+      <ConnectPicker peopleOnly preferClient={project.client_id} exclude={mine.map((x) => x.otherId)} onPick={(item) => connect({ type: 'project', id: project.id }, item)}>
         {({ toggle, anchor }) => (
           <button ref={anchor} type="button" onClick={toggle} className="w-fit text-[13px] font-medium text-muted hover:text-ink">
-            + Connect
+            + Add a person
           </button>
         )}
       </ConnectPicker>

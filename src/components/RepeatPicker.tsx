@@ -59,7 +59,7 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, defa
                     setCustom(false)
                     onChange(q.rule && rule?.weekend ? { ...q.rule, weekend: rule.weekend } : q.rule)
                   }}
-                  className={`h-8 rounded-full border px-3 text-[13px] ${active ? 'border-ink bg-ink text-white' : 'border-border bg-surface hover:bg-divider'}`}
+                  className={`h-8 rounded-full border px-3 text-[13px] ${active ? 'border-accent bg-accent text-white' : 'border-border bg-surface hover:bg-divider'}`}
                 >
                   {q.label}
                 </button>
@@ -71,7 +71,7 @@ export default function RepeatPicker({ rule, due, today, from, defaultFrom, defa
                 setCustom(true)
                 if (!c) onChange({ kind: 'custom', every: 1, unit: 'weeks', weekend: rule?.weekend })
               }}
-              className={`h-8 rounded-full border px-3 text-[13px] ${custom ? 'border-ink bg-ink text-white' : 'border-border bg-surface hover:bg-divider'}`}
+              className={`h-8 rounded-full border px-3 text-[13px] ${custom ? 'border-accent bg-accent text-white' : 'border-border bg-surface hover:bg-divider'}`}
             >
               Custom…
             </button>

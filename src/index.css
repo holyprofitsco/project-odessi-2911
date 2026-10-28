@@ -15,6 +15,8 @@
   --color-faint: #8b8b94;
   --color-accent: #8c6a80;
   --color-accent-tint: #f4ecf1;
+  /* Row hover: a whisper of the accent, so it follows if the accent ever changes. */
+  --color-hover: color-mix(in srgb, var(--color-accent) 7%, #ffffff);
   --color-waiting: #8a4a1f;
 
   --shadow-card: 0 1px 2px rgba(24, 24, 27, 0.05), 0 4px 12px rgba(24, 24, 27, 0.04);

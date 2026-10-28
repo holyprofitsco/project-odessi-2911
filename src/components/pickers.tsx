@@ -6,7 +6,11 @@ import { addDays, formatDate, formatTime, hhmm, monthNames, weekdayNames, weekda
 
 export function Floating({ anchor, onClose, height, width, children }: { anchor: RefObject<HTMLElement | null>; onClose: () => void; height: number; width: number; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null)
+  const [pos, setPos] = useState<{
+    top?: number
+    bottom?: number
+    left: number
+  } | null>(null)
 
   useLayoutEffect(() => {
     const r = anchor.current?.getBoundingClientRect()
@@ -70,6 +74,7 @@ export function DatePicker({
   placeholder = 'Add a date',
   clearable = true,
   quiet,
+  cell,
 }: {
   value: string | null
   onChange: (next: string | null) => void
@@ -80,6 +85,8 @@ export function DatePicker({
   clearable?: boolean
   // Plain text that only shows a box on hover, for quiet spots like "Client since".
   quiet?: boolean
+  // Custom trigger content that fills a list cell, so the whole cell opens the calendar.
+  cell?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
@@ -120,13 +127,21 @@ export function DatePicker({
           setOpen(!open)
         }}
         className={
-          quiet
-            ? `inline-flex h-8 items-center rounded-md px-1.5 hover:bg-divider ${value ? '' : 'text-faint'}`
-            : `inline-flex h-9 items-center gap-2 px-3 hover:bg-divider ${fieldCls} ${value ? 'text-ink' : 'text-faint'}`
+          cell !== undefined
+            ? 'flex h-8 w-full items-center rounded-md text-left'
+            : quiet
+              ? `inline-flex h-8 items-center rounded-md px-1.5 hover:bg-divider ${value ? '' : 'text-faint'}`
+              : `inline-flex h-9 items-center gap-2 px-3 hover:bg-divider ${fieldCls} ${value ? 'text-ink' : 'text-faint'}`
         }
       >
-        {!quiet && <CalendarIcon />}
-        {value ? formatDate(value, today) : placeholder}
+        {cell !== undefined ? (
+          cell
+        ) : (
+          <>
+            {!quiet && <CalendarIcon />}
+            {value ? formatDate(value, today) : placeholder}
+          </>
+        )}
       </button>
       {open && (
         <Floating anchor={anchor} onClose={close} height={420} width={316}>
@@ -164,7 +179,7 @@ export function DatePicker({
                     aria-pressed={selected}
                     onClick={() => pick(d)}
                     className={`mx-auto flex size-9 items-center justify-center rounded-full text-[13px] ${
-                      selected ? 'bg-ink font-semibold text-white' : isToday ? 'bg-accent-tint font-semibold text-accent hover:bg-divider' : inMonth ? 'hover:bg-divider' : 'text-[#B5B5BC] hover:bg-divider'
+                      selected ? 'bg-accent font-semibold text-white' : isToday ? 'bg-accent-tint font-semibold text-accent hover:bg-divider' : inMonth ? 'hover:bg-divider' : 'text-[#B5B5BC] hover:bg-divider'
                     }`}
                   >
                     {Number(d.slice(8))}
@@ -181,7 +196,7 @@ export function DatePicker({
                   type="button"
                   title={formatDate(q.date, today)}
                   onClick={() => pick(q.date)}
-                  className={`h-8 rounded-full border-[1.5px] px-3 text-[13px] font-medium ${q.date === value ? 'border-ink bg-ink text-white' : 'border-field bg-surface hover:bg-divider'}`}
+                  className={`h-8 rounded-full border-[1.5px] px-3 text-[13px] font-medium ${q.date === value ? 'border-accent bg-accent text-white' : 'border-field bg-surface hover:bg-divider'}`}
                 >
                   {q.label}
                 </button>
@@ -326,7 +341,7 @@ export function TimePicker({ value, onChange, label }: { value: string | null; o
                   setText(formatTime(t))
                   close()
                 }}
-                className={`flex h-8 w-full items-center rounded-lg px-2.5 text-left text-[13px] ${t === current ? 'bg-ink font-semibold text-white' : 'hover:bg-divider'}`}
+                className={`flex h-8 w-full items-center rounded-lg px-2.5 text-left text-[13px] ${t === current ? 'bg-accent font-semibold text-white' : 'hover:bg-divider'}`}
               >
                 {formatTime(t)}
               </button>

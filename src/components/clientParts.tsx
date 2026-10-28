@@ -22,7 +22,12 @@ export function Avatar({ name, business, size = 36, photo }: { name: string; bus
         alt=""
         aria-hidden="true"
         className={`shrink-0 ${business ? 'rounded-[28%] border border-border bg-white object-contain' : 'rounded-full object-cover'}`}
-        style={{ width: size, height: size, padding: business ? Math.max(2, Math.round(size * 0.08)) : 0, imageRendering: 'auto' }}
+        style={{
+          width: size,
+          height: size,
+          padding: business ? Math.max(2, Math.round(size * 0.08)) : 0,
+          imageRendering: 'auto',
+        }}
       />
     )
   }
@@ -325,9 +330,18 @@ export function StageMenu({ stage, api, sideways }: { stage: Status; api: StageA
                   key={c.bg}
                   type="button"
                   aria-label="Pick this color"
-                  onClick={() => api.updateStatus(stage.id, { color_bg: c.bg, color_text: c.text })}
+                  onClick={() =>
+                    api.updateStatus(stage.id, {
+                      color_bg: c.bg,
+                      color_text: c.text,
+                    })
+                  }
                   className="size-6 rounded-full border border-border"
-                  style={{ background: c.bg, outline: c.bg === stage.color_bg ? `2px solid ${c.text}` : undefined, outlineOffset: 1 }}
+                  style={{
+                    background: c.bg,
+                    outline: c.bg === stage.color_bg ? `2px solid ${c.text}` : undefined,
+                    outlineOffset: 1,
+                  }}
                 />
               ))}
             </div>
@@ -441,7 +455,7 @@ export function FieldValueEditor({ field, itemType, itemId, onEditField }: { fie
         aria-checked={on}
         aria-label={field.name}
         onClick={() => save(!on)}
-        className={`ml-1.5 flex size-[18px] items-center justify-center rounded-[5px] border-[1.5px] text-[11px] text-white ${on ? 'border-ink bg-ink' : 'border-[#C4C4CA] bg-surface hover:border-ink'}`}
+        className={`ml-1.5 flex size-[18px] items-center justify-center rounded-[5px] border-[1.5px] text-[11px] text-white ${on ? 'border-accent bg-accent' : 'border-[#C4C4CA] bg-surface hover:border-ink'}`}
       >
         {on && '✓'}
       </button>
@@ -545,7 +559,15 @@ function TextValue({ value, onSave, label, placeholder }: { value: string; onSav
 }
 
 function NumberInput({ value, onSave, label, money }: { value: number | null; onSave: (v: number | null) => void; label: string; money?: boolean }) {
-  const show = (v: number | null) => (v === null ? '' : money ? v.toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }) : String(v))
+  const show = (v: number | null) =>
+    v === null
+      ? ''
+      : money
+        ? v.toLocaleString('en-US', {
+            minimumFractionDigits: v % 1 ? 2 : 0,
+            maximumFractionDigits: 2,
+          })
+        : String(v)
   const [draft, setDraft] = useState(show(value))
   useEffect(() => setDraft(show(value)), [value]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
@@ -613,7 +635,16 @@ export function FieldModal({ open, onClose, field }: { open: boolean; onClose: (
 
   const done = async () => {
     if (!name.trim() || !type) return
-    const all = newOption.trim() ? [...options, { id: newOptionId(), name: newOption.trim(), ...(({ bg, text }) => ({ bg, text }))(statusColors[options.length % statusColors.length]) }] : options
+    const all = newOption.trim()
+      ? [
+          ...options,
+          {
+            id: newOptionId(),
+            name: newOption.trim(),
+            ...(({ bg, text }) => ({ bg, text }))(statusColors[options.length % statusColors.length]),
+          },
+        ]
+      : options
     const opts = hasOptions(type) ? all : []
     if (field) await updateField(field.id, { name: name.trim(), options: opts })
     else await addField({ name: name.trim(), type, options: opts })
@@ -751,7 +782,11 @@ export function FieldModal({ open, onClose, field }: { open: boolean; onClose: (
                             setColorFor(null)
                           }}
                           className="flex h-6 items-center rounded-full px-2.5 text-xs font-medium"
-                          style={{ background: c.bg, color: c.text, outline: c.bg === o.bg ? `2px solid ${c.text}` : undefined }}
+                          style={{
+                            background: c.bg,
+                            color: c.text,
+                            outline: c.bg === o.bg ? `2px solid ${c.text}` : undefined,
+                          }}
                         >
                           Aa
                         </button>
@@ -783,10 +818,15 @@ export function FieldModal({ open, onClose, field }: { open: boolean; onClose: (
 export function ConnectPicker({
   onPick,
   exclude = [],
+  peopleOnly = false,
+  preferClient,
   children,
 }: {
   onPick: (item: { type: ItemType; id: string }) => void
   exclude?: string[]
+  /* Only list people (no clients, no "New client"), with preferClient's people first. */
+  peopleOnly?: boolean
+  preferClient?: string | null
   children: (props: { toggle: () => void; anchor: React.RefObject<HTMLButtonElement> }) => ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -798,6 +838,8 @@ export function ConnectPicker({
         <Floating anchor={anchor} onClose={() => setOpen(false)} height={340} width={320}>
           <ConnectList
             exclude={exclude}
+            peopleOnly={peopleOnly}
+            preferClient={preferClient}
             onPick={(item) => {
               setOpen(false)
               onPick(item)
@@ -811,44 +853,88 @@ export function ConnectPicker({
 
 export function useClientSearch() {
   const { clients, people } = useClients()
-  return (query: string, exclude: string[] = []) => {
+  return (
+    query: string,
+    exclude: string[] = [],
+    opts: {
+      peopleOnly?: boolean
+      preferClient?: string | null
+      limit?: number
+    } = {},
+  ) => {
     const q = query.trim().toLowerCase()
     const match = (s: string) => !q || s.toLowerCase().includes(q)
-    const items: { type: ItemType; id: string; name: string; sub: string; business: boolean; photo: string | null; client: Client; person?: Person }[] = []
-    for (const c of clients) {
-      if (!exclude.includes(c.id) && match(c.name)) items.push({ type: 'client', id: c.id, name: c.name || 'Untitled', sub: c.kind === 'business' ? 'Business' : 'Client', business: c.kind === 'business', photo: c.photo_url, client: c })
-    }
+    const items: {
+      type: ItemType
+      id: string
+      name: string
+      sub: string
+      business: boolean
+      photo: string | null
+      client: Client
+      person?: Person
+    }[] = []
+    if (!opts.peopleOnly)
+      for (const c of clients) {
+        if (!exclude.includes(c.id) && match(c.name))
+          items.push({
+            type: 'client',
+            id: c.id,
+            name: c.name || 'Untitled',
+            sub: c.kind === 'business' ? 'Business' : 'Client',
+            business: c.kind === 'business',
+            photo: c.photo_url,
+            client: c,
+          })
+      }
     for (const p of people) {
       const c = clients.find((x) => x.id === p.client_id)
-      if (c && !exclude.includes(p.id) && match(p.name)) items.push({ type: 'person', id: p.id, name: p.name || 'Unnamed', sub: c.name, business: false, photo: p.photo_url, client: c, person: p })
+      if (c && !exclude.includes(p.id) && match(p.name))
+        items.push({
+          type: 'person',
+          id: p.id,
+          name: p.name || 'Unnamed',
+          sub: c.name,
+          business: false,
+          photo: p.photo_url,
+          client: c,
+          person: p,
+        })
     }
-    return items.sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q))).slice(0, 8)
+    const rank = (x: (typeof items)[number]) => (opts.preferClient && x.client.id === opts.preferClient ? 2 : 0) + (x.name.toLowerCase().startsWith(q) ? 1 : 0)
+    return items.sort((a, b) => rank(b) - rank(a)).slice(0, opts.limit ?? 8)
   }
 }
 
-function ConnectList({ onPick, exclude }: { onPick: (item: { type: ItemType; id: string }) => void; exclude: string[] }) {
+function ConnectList({ onPick, exclude, peopleOnly, preferClient }: { onPick: (item: { type: ItemType; id: string }) => void; exclude: string[]; peopleOnly?: boolean; preferClient?: string | null }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'clients' | 'people'>('all')
   const search = useClientSearch()
   const { addClient } = useClients()
-  const results = search(query, exclude).filter((r) => filter === 'all' || (filter === 'clients' ? r.type === 'client' : r.type === 'person'))
+  const results = search(query, exclude, {
+    peopleOnly: peopleOnly || filter === 'people',
+    preferClient,
+    limit: peopleOnly ? 20 : 8,
+  }).filter((r) => filter !== 'clients' || r.type === 'client')
   return (
     <div className="flex flex-col gap-2 p-2.5">
       <input
         autoFocus
         aria-label="Search"
-        placeholder="Search clients and people"
+        placeholder={peopleOnly ? 'Search people' : 'Search clients and people'}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         className="h-9 rounded-lg border-[1.5px] border-field px-2.5 text-[13px] focus:outline-none"
       />
-      <div className="flex gap-1">
-        {(['all', 'clients', 'people'] as const).map((f) => (
-          <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)} className={`h-7 rounded-md px-2.5 text-xs font-medium ${filter === f ? 'bg-divider text-ink' : 'text-muted hover:text-ink'}`}>
-            {f === 'all' ? 'All' : f === 'clients' ? 'Clients' : 'People'}
-          </button>
-        ))}
-      </div>
+      {!peopleOnly && (
+        <div className="flex gap-1">
+          {(['all', 'clients', 'people'] as const).map((f) => (
+            <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)} className={`h-7 rounded-md px-2.5 text-xs font-medium ${filter === f ? 'bg-divider text-ink' : 'text-muted hover:text-ink'}`}>
+              {f === 'all' ? 'All' : f === 'clients' ? 'Clients' : 'People'}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex max-h-56 flex-col overflow-y-auto">
         {results.map((r) => (
           <button key={r.id} type="button" onClick={() => onPick({ type: r.type, id: r.id })} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-divider">
@@ -859,9 +945,9 @@ function ConnectList({ onPick, exclude }: { onPick: (item: { type: ItemType; id:
             </span>
           </button>
         ))}
-        {results.length === 0 && <span className="px-2 py-2 text-xs text-muted">Nothing found.</span>}
+        {results.length === 0 && <span className="px-2 py-2 text-xs text-muted">{peopleOnly ? 'No people found. Add people on a client’s page.' : 'Nothing found.'}</span>}
       </div>
-      {query.trim() && (
+      {query.trim() && !peopleOnly && (
         <div className="border-t border-divider pt-1.5">
           {(['person', 'business'] as const).map((kind) => (
             <MenuItem

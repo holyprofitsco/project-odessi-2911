@@ -252,7 +252,7 @@ function TopBoxes({ client, onOpenTask }: { client: Client; onOpenTask: (id: str
                 setShowAll(false)
                 onOpenTask(t.id)
               }}
-              className="flex flex-col items-start gap-0.5 border-divider px-4 py-3 text-left hover:bg-[#F1F1F4] [&+&]:border-t"
+              className="flex flex-col items-start gap-0.5 border-divider px-4 py-3 text-left hover:bg-hover [&+&]:border-t"
             >
               <span className="text-sm font-semibold">{t.title}</span>
               <span className="text-[13px] text-waiting">
@@ -358,7 +358,7 @@ function ClientProjects({ client }: { client: Client }) {
           const status = statusById(p.status_id)
           const prog = progress(p.id)
           return (
-            <button key={p.id} type="button" onClick={() => navigate(`/projects/${p.id}`)} className="flex min-h-[52px] w-full items-center gap-4 border-divider px-[18px] py-2 text-left hover:bg-[#F1F1F4] [&+&]:border-t">
+            <button key={p.id} type="button" onClick={() => navigate(`/projects/${p.id}`)} className="flex min-h-[52px] w-full items-center gap-4 border-divider px-[18px] py-2 text-left hover:bg-hover [&+&]:border-t">
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm font-medium">{p.name || 'Untitled project'}</span>
                 <span className="truncate text-xs text-muted">
@@ -483,7 +483,7 @@ function NotesSection({ client, onOpenTask }: { client: Client; onOpenTask: (id:
                   setKind(k.value)
                   box.current?.focus()
                 }}
-                className={`h-8 rounded-full px-3.5 text-[13px] font-medium ${kind === k.value ? 'bg-ink text-white' : 'border-[1.5px] border-field bg-surface text-ink hover:border-[#C4C4CA]'}`}
+                className={`h-8 rounded-full px-3.5 text-[13px] font-medium ${kind === k.value ? 'bg-accent text-white' : 'border-[1.5px] border-field bg-surface text-ink hover:border-[#C4C4CA]'}`}
               >
                 {k.label}
               </button>

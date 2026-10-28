@@ -7,7 +7,7 @@ import { MenuItem, Popover } from './ui'
 
 /* Rows for task sets and templates: drag handle (or step number), title, When, Priority, ×. */
 
-export function WhenControl({ offset, countFrom, onChange }: { offset: number; countFrom: 'start' | 'launch'; onChange: (n: number) => void }) {
+export function WhenControl({ offset, countFrom, bigDay = 'Launch day', onChange }: { offset: number; countFrom: 'start' | 'launch'; bigDay?: string; onChange: (n: number) => void }) {
   const [days, setDays] = useState(String(countFrom === 'start' ? offset + 1 : Math.abs(offset)))
   const side = offset < 0 ? 'before' : offset > 0 ? 'after' : 'on'
   const num = 'h-8 w-12 rounded-md border-[1.5px] border-field px-1.5 text-center text-[13px] focus:outline-none'
@@ -49,7 +49,7 @@ export function WhenControl({ offset, countFrom, onChange }: { offset: number; c
       <Popover
         trigger={({ toggle }) => (
           <button type="button" onClick={toggle} className="h-8 rounded-md px-1.5 font-medium text-ink hover:bg-divider">
-            {side === 'on' ? 'Launch day' : side === 'before' ? (Math.abs(offset) === 1 ? 'day before' : 'days before') : Math.abs(offset) === 1 ? 'day after' : 'days after'} ▾
+            {side === 'on' ? bigDay : side === 'before' ? (Math.abs(offset) === 1 ? 'day before' : 'days before') : Math.abs(offset) === 1 ? 'day after' : 'days after'} ▾
           </button>
         )}
       >
@@ -66,7 +66,7 @@ export function WhenControl({ offset, countFrom, onChange }: { offset: number; c
                   onChange(s === 'on' ? 0 : s === 'before' ? -n : n)
                 }}
               >
-                {s === 'on' ? 'Launch day' : `Days ${s}`}
+                {s === 'on' ? bigDay : `Days ${s}`}
               </MenuItem>
             ))}
           </div>
@@ -107,7 +107,7 @@ function PriorityMenu({ value, onChange }: { value: Priority; onChange: (p: Prio
   )
 }
 
-export function PlanRows({ items, countFrom, inOrder, onChange, addLabel }: { items: PlanItem[]; countFrom: 'start' | 'launch'; inOrder: boolean; onChange: (items: PlanItem[]) => void; addLabel: string }) {
+export function PlanRows({ items, countFrom, bigDay, inOrder, onChange, addLabel }: { items: PlanItem[]; countFrom: 'start' | 'launch'; bigDay?: string; inOrder: boolean; onChange: (items: PlanItem[]) => void; addLabel: string }) {
   const { workspace } = useWorkspace()
   const [dragId, setDragId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -149,8 +149,8 @@ export function PlanRows({ items, countFrom, inOrder, onChange, addLabel }: { it
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             className="h-8 min-w-0 flex-1 rounded-md border-[1.5px] border-transparent bg-transparent px-1.5 text-sm hover:border-field focus:border-field focus:outline-none"
           />
-          <span title={whenLabel(i.offset, countFrom)}>
-            <WhenControl offset={i.offset} countFrom={countFrom} onChange={(offset) => set(i.id, { offset })} />
+          <span title={whenLabel(i.offset, countFrom, bigDay)}>
+            <WhenControl offset={i.offset} countFrom={countFrom} bigDay={bigDay} onChange={(offset) => set(i.id, { offset })} />
           </span>
           {workspace?.priorities_on && <PriorityMenu value={i.priority} onChange={(priority) => set(i.id, { priority })} />}
           <button type="button" aria-label={`Remove ${i.title}`} onClick={() => onChange(items.filter((x) => x.id !== i.id))} className="size-7 rounded-md text-faint opacity-0 group-hover:opacity-100 hover:bg-divider hover:text-ink">
@@ -162,5 +162,54 @@ export function PlanRows({ items, countFrom, inOrder, onChange, addLabel }: { it
         <input aria-label={addLabel} placeholder={`+ ${addLabel}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} className="h-11 flex-1 bg-transparent pl-8 text-[13px] font-medium placeholder:text-muted focus:outline-none" />
       </div>
     </div>
+  )
+}
+
+/* What a template calls its big day. Shown when dates count back from it. */
+
+export const bigDayNames = ['Launch day', 'Event day', 'Go-live day', 'Deadline']
+
+export function BigDayPicker({ value, onChange }: { value: string; onChange: (name: string) => void }) {
+  const [draft, setDraft] = useState('')
+  const own = !bigDayNames.includes(value)
+  return (
+    <Popover
+      trigger={({ toggle, open }) => (
+        <button type="button" aria-label="Name of the big day" aria-expanded={open} onClick={toggle} className="h-8 rounded-md px-1.5 text-sm font-semibold hover:bg-divider">
+          {value} ▾
+        </button>
+      )}
+    >
+      {(close) => (
+        <div className="flex w-56 flex-col">
+          {bigDayNames.map((n) => (
+            <MenuItem
+              key={n}
+              selected={n === value}
+              onClick={() => {
+                close()
+                onChange(n)
+              }}
+            >
+              {n}
+            </MenuItem>
+          ))}
+          <div className="my-1 border-t border-divider" />
+          <input
+            aria-label="Your own name for the big day"
+            placeholder={own ? value : 'Your own words, like Opening night'}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !draft.trim()) return
+              onChange(draft.trim())
+              setDraft('')
+              close()
+            }}
+            className="mx-1 mb-1 h-8 rounded-lg border-[1.5px] border-field px-2 text-[13px] focus:border-ink focus:outline-none"
+          />
+        </div>
+      )}
+    </Popover>
   )
 }

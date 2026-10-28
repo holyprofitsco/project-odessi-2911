@@ -279,7 +279,7 @@ function ClientRow({ client, grid, showStage, onDrag }: { client: Client; grid: 
       tabIndex={0}
       onClick={() => navigate(`/clients/${client.id}`)}
       onKeyDown={(e) => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
-      className={`${grid} min-h-[60px] cursor-pointer border-divider px-[18px] py-2 hover:bg-[#F1F1F4] focus-visible:bg-[#F1F1F4] focus-visible:outline-none [&+&]:border-t`}
+      className={`${grid} min-h-[60px] cursor-pointer border-divider px-[18px] py-2 hover:bg-hover focus-visible:bg-hover focus-visible:outline-none [&+&]:border-t`}
     >
       <span className="flex min-w-0 items-center gap-3">
         <Avatar name={client.name} business={client.kind === 'business'} photo={client.photo_url} />

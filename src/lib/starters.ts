@@ -2,7 +2,7 @@ import type { Layout, PlanGroup, PlanItem } from './projects'
 import type { Priority } from './tasks'
 
 // Ready-made project templates. "Customize" copies one into your own templates, where you can change anything.
-export type Starter = { key: string; name: string; description: string; layout: Layout; count_from: 'start' | 'launch'; groups: PlanGroup[] }
+export type Starter = { key: string; name: string; description: string; layout: Layout; count_from: 'start' | 'launch'; big_day?: string; groups: PlanGroup[] }
 
 let n = 0
 const item = (title: string, offset: number, priority: Priority = 'none'): PlanItem => ({ id: `s${++n}`, title, offset, priority })
@@ -25,8 +25,8 @@ export const starters: Starter[] = [
   },
   {
     key: 'client-project',
-    name: 'Client project (done for you)',
-    description: 'Six weeks of client work, from onboarding to handoff',
+    name: 'Client project',
+    description: 'From welcome email to wrap-up, about six weeks',
     layout: 'phases',
     count_from: 'start',
     groups: [
@@ -43,6 +43,7 @@ export const starters: Starter[] = [
     description: 'Counts back from event day',
     layout: 'milestones',
     count_from: 'launch',
+    big_day: 'Event day',
     groups: [
       group('Venue booked', [item('Set the budget', -95, 'high'), item('Shortlist venues', -92), item('Visit or video tour the top two', -88), item('Sign the venue contract', -84, 'high')], -84),
       group('Tickets on sale', [item('Write the event page', -66), item('Set up ticketing', -62, 'high'), item('Announce the event', -60), item('Email your list', -59)], -60),

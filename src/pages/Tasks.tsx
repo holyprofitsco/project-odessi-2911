@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { pointFrom, TaskMenu, type MenuPoint } from '../components/ContextMenu'
 import { MenuWithHint, SaveAsTaskSetModal, SplitButton, TaskSetMenu, TaskSetUseModal } from '../components/projectParts'
 import { useProjects, type TaskSet } from '../lib/projects'
 import TaskModal from '../components/TaskModal'
@@ -35,7 +36,12 @@ const savePref = (key: string, value: string) => {
 
 function dateInZone(iso: string, timeZone: string) {
   try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(iso))
   } catch {
     return iso.slice(0, 10)
   }
@@ -54,7 +60,10 @@ export default function Tasks() {
   const [useSet, setUseSet] = useState<TaskSet | null>(null)
 
   const newTask = async (changes: Partial<Task> = {}) => {
-    const t = await addTask({ due_date: workspace?.default_due === 'today' ? today : null, ...changes })
+    const t = await addTask({
+      due_date: workspace?.default_due === 'today' ? today : null,
+      ...changes,
+    })
     if (t) open(t.id)
   }
 
@@ -275,6 +284,9 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
       return next
     })
 
+  // Group titles look like the ones on Projects. The first one also carries the Due / Priority / Status headers.
+  const groupHead = (title: ReactNode, first: boolean) =>
+    first ? <TaskColumnHeaders className="min-h-6 pr-[19px] pl-1" first={title} /> : title ? <div className="flex min-h-6 items-center gap-1 px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">{title}</div> : null
   const rowProps = (t: Task, list: Task[]) => ({
     task: t,
     selected: selected.has(t.id),
@@ -352,25 +364,24 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
         <DatePicker label="Due date for the new task" value={chosenDate} today={today} weekStart={workspace.week_start} placeholder="No date" onChange={setQuickDate} />
       </Card>
 
-      {(sections.length > 0 || comingUp.length > 0) && (
-        <TaskColumnHeaders className="-mb-1 pr-[18px] pl-3" lead={<span className="w-[calc(16px+12px+18px)] shrink-0" />} />
-      )}
-
       {sections.length === 0 && done.length === 0 ? (
         <EmptyState
           title={tab === 'today' ? 'Nothing on for today' : tab === 'upcoming' ? 'Nothing coming up' : 'No tasks yet'}
           description={tab === 'all' ? 'Type a task above to get started.' : 'Add a task above, or look under All to see everything.'}
         />
       ) : (
-        sections.map((s) => (
+        sections.map((s, i) => (
           <div key={s.key} className="flex flex-col gap-1.5">
-            {s.title && (
-              <div className="flex items-center gap-1 px-1">
-                <h2 className="text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
-                  {s.title} · {s.tasks.length}
-                </h2>
-                {group === 'status' && statusById(s.key) && <StageMenu stage={statusById(s.key)!} api={tasksApi} />}
-              </div>
+            {groupHead(
+              s.title && (
+                <>
+                  <h2>
+                    {s.title} · {s.tasks.length}
+                  </h2>
+                  {group === 'status' && statusById(s.key) && <StageMenu stage={statusById(s.key)!} api={tasksApi} />}
+                </>
+              ),
+              i === 0,
             )}
             <Card>
               {s.tasks.map((t) => (
@@ -383,7 +394,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
 
       {comingUp.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <h2 className="px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Coming up, waiting on others · {comingUp.length}</h2>
+          {groupHead(<h2>Coming up, waiting on others · {comingUp.length}</h2>, sections.length === 0)}
           <Card>
             {comingUp.map((t) => (
               <TaskRow key={t.id} {...rowProps(t, comingUp)} showStatus />
@@ -410,7 +421,8 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
       {done.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={() => setShowDone(!showDone)} className="w-fit px-1 text-[13px] font-medium text-muted hover:text-ink">
-            {showDone ? '⌄' : '›'} {done.length} done{tab === 'today' ? ' today' : ''}
+            {showDone ? '⌄' : '›'} {done.length} done
+            {tab === 'today' ? ' today' : ''}
           </button>
           {showDone && (
             <Card>
@@ -500,7 +512,11 @@ function BulkBar({ ids, onClear }: { ids: string[]; onClear: () => void }) {
           weekStart={workspace?.week_start}
           placeholder="Due date"
           onChange={(d) => {
-            updateMany(ids, { due_date: d, repeat_anchor: null, ...(d ? {} : { due_time: null }) })
+            updateMany(ids, {
+              due_date: d,
+              repeat_anchor: null,
+              ...(d ? {} : { due_time: null }),
+            })
             onClear()
           }}
         />
@@ -582,6 +598,7 @@ function TaskRow({
   const { statusById, tasks, today, blockersOf } = useTasks()
   const { projects } = useProjects()
   const { waitingName, clientFor } = useClientInfo()
+  const [menu, setMenu] = useState<MenuPoint | null>(null)
   const status = statusById(task.status_id)
   if (!status) return null
   const who = waitingName(task)
@@ -596,61 +613,70 @@ function TaskRow({
   const context = [client?.name, project?.name].filter(Boolean).join(' · ')
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/plain', task.id)
-        onDragStart()
-      }}
-      onDragEnd={onDragEnd}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault()
-        onDropOn()
-      }}
-      onClick={() => onOpen(task.id)}
-      onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className={`group flex min-h-[52px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-3 hover:bg-[#F1F1F4] focus-visible:bg-[#F1F1F4] focus-visible:outline-none [&+&]:border-t ${selected ? 'bg-accent-tint hover:bg-accent-tint' : ''} ${dragging ? 'opacity-40' : ''}`}
-    >
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={selected}
-        aria-label={`Select ${task.title}`}
-        onClick={(e) => {
-          e.stopPropagation()
-          onSelect(task.id)
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        onContextMenu={(e) => setMenu(pointFrom(e))}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', task.id)
+          onDragStart()
         }}
-        className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border-[1.5px] text-[10px] leading-none text-white ${selected ? 'border-ink bg-ink' : 'border-[#C4C4CA] bg-surface'} ${selected || anySelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+        onDragEnd={onDragEnd}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          onDropOn()
+        }}
+        onClick={() => onOpen(task.id)}
+        onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
+        className={`group flex min-h-[52px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-3 hover:bg-hover focus-visible:bg-hover focus-visible:outline-none [&+&]:border-t ${selected ? 'bg-accent-tint hover:bg-accent-tint' : ''} ${dragging ? 'opacity-40' : ''}`}
       >
-        {selected && '✓'}
-      </button>
-      <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={() => onToggle(task)} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
-        {(waitingLine || blocker || subs.length > 0 || task.repeat_rule || context) && (
-          <span className="flex items-center gap-2 text-xs text-faint">
-            {context && <span className="shrink-0 truncate text-muted">{context}</span>}
-            {blocker && !waitingLine && <span className="truncate">Can't start until {blocker.title}</span>}
-            {waitingLine && (
-              <span className="truncate text-waiting" title={waitingLine}>
-                {waitingLine}
-              </span>
-            )}
-            {task.repeat_rule && (
-              <span className="inline-flex shrink-0 items-center gap-1">
-                <RepeatIcon size={11} />
-                {describeRepeat(task.repeat_rule, task.due_date ?? today)}
-              </span>
-            )}
-            {subs.length > 0 && <span className="shrink-0">{subsDone} of {subs.length} subtasks</span>}
-          </span>
-        )}
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={`Select ${task.title}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelect(task.id)
+          }}
+          className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border-[1.5px] text-[10px] leading-none text-white ${selected ? 'border-accent bg-accent' : 'border-[#C4C4CA] bg-surface'} ${selected || anySelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+        >
+          {selected && '✓'}
+        </button>
+        <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={() => onToggle(task)} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
+          {(waitingLine || blocker || subs.length > 0 || task.repeat_rule || context) && (
+            <span className="flex items-center gap-2 text-xs text-faint">
+              {context && <span className="shrink-0 truncate text-muted">{context}</span>}
+              {blocker && !waitingLine && <span className="truncate text-waiting">Can't start until {blocker.title}</span>}
+              {waitingLine && (
+                <span className="truncate text-waiting" title={waitingLine}>
+                  {waitingLine}
+                </span>
+              )}
+              {task.repeat_rule && (
+                <span className="inline-flex shrink-0 items-center gap-1">
+                  <RepeatIcon size={11} />
+                  {describeRepeat(task.repeat_rule, task.due_date ?? today)}
+                </span>
+              )}
+              {subs.length > 0 && (
+                <span className="shrink-0">
+                  {subsDone} of {subs.length} subtasks
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        <TaskColumns task={task} showStatus={showStatus} />
       </div>
-      <TaskColumns task={task} showStatus={showStatus} />
-    </div>
+      {/* Outside the row, so clicks in the menu don't open the task. */}
+      {menu && <TaskMenu task={task} at={menu} onClose={() => setMenu(null)} onOpen={() => onOpen(task.id)} />}
+    </>
   )
 }
 
@@ -686,7 +712,14 @@ function BoardCard({ t, onOpen }: { t: Task; onOpen: (id: string) => void }) {
   )
 }
 
-type Column = { key: string; head: ReactNode; tasks: Task[]; drop?: (t: Task) => void; add?: Partial<Task>; stage?: Status }
+type Column = {
+  key: string
+  head: ReactNode
+  tasks: Task[]
+  drop?: (t: Task) => void
+  add?: Partial<Task>
+  stage?: Status
+}
 
 function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (changes: Partial<Task>) => void }) {
   const tasksApi = useTasks()
@@ -712,16 +745,53 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
   } else if (by === 'due') {
     const pick = (f: (t: Task) => boolean) => notDone.filter(f).sort(byDue)
     columns = [
-      { key: 'past', head: <span className="text-[13px] font-semibold">Past due</span>, tasks: pick((t) => !!t.due_date && t.due_date < today) },
-      { key: 'today', head: <span className="text-[13px] font-semibold">Today</span>, tasks: pick((t) => t.due_date === today), drop: (t) => updateTask(t.id, { due_date: today, repeat_anchor: null }), add: { due_date: today } },
-      { key: 'tomorrow', head: <span className="text-[13px] font-semibold">Tomorrow</span>, tasks: pick((t) => t.due_date === tomorrow), drop: (t) => updateTask(t.id, { due_date: tomorrow, repeat_anchor: null }), add: { due_date: tomorrow } },
-      { key: 'later', head: <span className="text-[13px] font-semibold">Later</span>, tasks: pick((t) => !!t.due_date && t.due_date > tomorrow) },
-      { key: 'none', head: <span className="text-[13px] font-semibold">No date</span>, tasks: pick((t) => !t.due_date), drop: (t) => updateTask(t.id, { due_date: null, due_time: null, repeat_anchor: null }) },
+      {
+        key: 'past',
+        head: <span className="text-[13px] font-semibold">Past due</span>,
+        tasks: pick((t) => !!t.due_date && t.due_date < today),
+      },
+      {
+        key: 'today',
+        head: <span className="text-[13px] font-semibold">Today</span>,
+        tasks: pick((t) => t.due_date === today),
+        drop: (t) => updateTask(t.id, { due_date: today, repeat_anchor: null }),
+        add: { due_date: today },
+      },
+      {
+        key: 'tomorrow',
+        head: <span className="text-[13px] font-semibold">Tomorrow</span>,
+        tasks: pick((t) => t.due_date === tomorrow),
+        drop: (t) => updateTask(t.id, { due_date: tomorrow, repeat_anchor: null }),
+        add: { due_date: tomorrow },
+      },
+      {
+        key: 'later',
+        head: <span className="text-[13px] font-semibold">Later</span>,
+        tasks: pick((t) => !!t.due_date && t.due_date > tomorrow),
+      },
+      {
+        key: 'none',
+        head: <span className="text-[13px] font-semibold">No date</span>,
+        tasks: pick((t) => !t.due_date),
+        drop: (t) =>
+          updateTask(t.id, {
+            due_date: null,
+            due_time: null,
+            repeat_anchor: null,
+          }),
+      },
     ]
   } else {
     columns = statuses
       .filter((s) => s.behavior === 'open' || s.behavior === 'waiting')
-      .map((s) => ({ key: s.id, head: <StatusPill status={s} />, tasks: visible.filter((t) => t.status_id === s.id).sort(byDue), drop: (t) => setStatus(t, s.id), add: { status_id: s.id }, stage: s }))
+      .map((s) => ({
+        key: s.id,
+        head: <StatusPill status={s} />,
+        tasks: visible.filter((t) => t.status_id === s.id).sort(byDue),
+        drop: (t) => setStatus(t, s.id),
+        add: { status_id: s.id },
+        stage: s,
+      }))
   }
 
   // Columns you can't drop onto (Past due, Later) only show while they hold something.
@@ -786,7 +856,12 @@ function BoardView({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: (ch
           <div
             onDragOver={(e) => over(e, doneStatus.id)}
             onDragLeave={() => setOverId(null)}
-            onDrop={(e) => drop(e, { key: doneStatus.id, drop: (t) => setStatus(t, doneStatus.id) })}
+            onDrop={(e) =>
+              drop(e, {
+                key: doneStatus.id,
+                drop: (t) => setStatus(t, doneStatus.id),
+              })
+            }
             className={`flex shrink-0 flex-col gap-2.5 rounded-2xl p-2 ${doneOpen ? 'w-[300px]' : 'w-12 items-center'} ${overId === doneStatus.id ? 'bg-[#EDEDF0]' : ''}`}
           >
             <button type="button" onClick={() => setDoneOpen(!doneOpen)} className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted hover:text-ink" aria-expanded={doneOpen}>

@@ -4,6 +4,7 @@ import type { StageApi } from '../lib/clients'
 import { priorityStyles, statusColors, useTasks, type Priority, type Status, type Task } from '../lib/tasks'
 import { Button, MenuItem, Modal, Pill, Popover, useToast } from './ui'
 import { useWorkspace } from '../lib/workspace'
+import { DatePicker } from './pickers'
 
 // Small pieces shared by the Tasks list, the board, and the task pop-up.
 
@@ -92,51 +93,59 @@ export function StatusPicker({ status, onPick, onEdit, options, small }: { statu
   const tasksApi = useTasks()
   const statuses = options ?? tasksApi.statuses
   return (
-    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="inline-flex">
-    <Popover
-      align={small ? 'end' : 'start'}
-      trigger={({ toggle, open }) => (
-        <button
-          type="button"
-          aria-label={`Status: ${status.name}. Change status`}
-          aria-expanded={open}
-          onClick={toggle}
-          className="rounded-full ring-offset-2 transition-shadow hover:ring-2 hover:ring-border focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
-        >
-          <StatusPill status={status} className={small ? 'cursor-pointer' : 'h-8 cursor-pointer px-4 text-[13px]'} />
-        </button>
-      )}
-    >
-      {(close) => (
-        <div className="w-48">
-          {statuses.map((s) => (
-            <MenuItem
-              key={s.id}
-              selected={s.id === status.id}
-              onClick={() => {
-                onPick(s.id)
-                close()
-              }}
+    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className={small ? 'flex w-full' : 'inline-flex'}>
+      <Popover
+        align={small ? 'end' : 'start'}
+        className={small ? 'block w-full' : 'inline-block'}
+        trigger={({ toggle, open }) =>
+          small ? (
+            // In a list the whole cell is the button, so it's easy to hit.
+            <button type="button" aria-label={`Status: ${status.name}. Change status`} aria-expanded={open} onClick={toggle} className="group/st flex h-8 w-full items-center text-left focus-visible:outline-none">
+              <StatusPill status={status} className="cursor-pointer ring-offset-2 transition-shadow group-hover/st:ring-2 group-hover/st:ring-border group-focus-visible/st:ring-2 group-focus-visible/st:ring-accent/40" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={`Status: ${status.name}. Change status`}
+              aria-expanded={open}
+              onClick={toggle}
+              className="rounded-full ring-offset-2 transition-shadow hover:ring-2 hover:ring-border focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             >
-              <StatusPill status={s} />
-            </MenuItem>
-          ))}
-          {onEdit && (
-            <>
-              <div className="my-1 border-t border-divider" />
+              <StatusPill status={status} className="h-8 cursor-pointer px-4 text-[13px]" />
+            </button>
+          )
+        }
+      >
+        {(close) => (
+          <div className="w-48">
+            {statuses.map((s) => (
               <MenuItem
+                key={s.id}
+                selected={s.id === status.id}
                 onClick={() => {
-                  onEdit()
+                  onPick(s.id)
                   close()
                 }}
               >
-                Edit stages…
+                <StatusPill status={s} />
               </MenuItem>
-            </>
-          )}
-        </div>
-      )}
-    </Popover>
+            ))}
+            {onEdit && (
+              <>
+                <div className="my-1 border-t border-divider" />
+                <MenuItem
+                  onClick={() => {
+                    onEdit()
+                    close()
+                  }}
+                >
+                  Edit stages…
+                </MenuItem>
+              </>
+            )}
+          </div>
+        )}
+      </Popover>
     </span>
   )
 }
@@ -184,7 +193,10 @@ export function StatusEditor({ open, onClose, api }: { open: boolean; onClose: (
         </>
       }
     >
-      <p className="mb-3 text-[13px] text-muted">Rename a stage, change its color, or put the stages in the order you work.{required.length > 0 && ` ${requiredText} required, but you can rename and recolor them.`}</p>
+      <p className="mb-3 text-[13px] text-muted">
+        Rename a stage, change its color, or put the stages in the order you work.
+        {required.length > 0 && ` ${requiredText} required, but you can rename and recolor them.`}
+      </p>
       <div className="flex flex-col">
         {statuses.map((s, i) => (
           <div key={s.id} className="flex flex-col gap-2 border-t border-divider py-2 first:border-t-0">
@@ -237,11 +249,18 @@ export function StatusEditor({ open, onClose, api }: { open: boolean; onClose: (
                     type="button"
                     aria-label="Pick this color"
                     onClick={() => {
-                      updateStatus(s.id, { color_bg: c.bg, color_text: c.text })
+                      updateStatus(s.id, {
+                        color_bg: c.bg,
+                        color_text: c.text,
+                      })
                       setColorFor(null)
                     }}
                     className="flex h-6 items-center rounded-full px-2.5 text-xs font-medium"
-                    style={{ background: c.bg, color: c.text, outline: c.bg === s.color_bg ? `2px solid ${c.text}` : undefined }}
+                    style={{
+                      background: c.bg,
+                      color: c.text,
+                      outline: c.bg === s.color_bg ? `2px solid ${c.text}` : undefined,
+                    }}
                   >
                     Aa
                   </button>
@@ -262,28 +281,79 @@ export const PRIORITY_COL = 'w-[84px] shrink-0'
 export const STATUS_COL = 'w-[112px] shrink-0'
 
 export function TaskColumns({ task, showStatus = true }: { task: Task; showStatus?: boolean }) {
-  const { today, statusById, setStatus } = useTasks()
+  const { today, statusById, setStatus, changeDue, updateTask } = useTasks()
   const { workspace } = useWorkspace()
   const status = statusById(task.status_id)
   const done = status?.behavior === 'done'
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation()
   return (
     <>
-      <span className={DUE_COL}>
-        <DueText task={task} today={today} done={done} />
+      {/* Each cell is its own button, so a click changes the value instead of opening the task. */}
+      <span className={DUE_COL} onClick={stop} onKeyDown={stop}>
+        <DatePicker label="Due date" value={task.due_date} today={today} weekStart={workspace?.week_start} onChange={(d) => changeDue(task, d)} cell={task.due_date ? <DueText task={task} today={today} done={done} /> : <CellHint />} />
       </span>
-      {workspace?.priorities_on && <span className={PRIORITY_COL}>{task.priority !== 'none' && <PriorityPill priority={task.priority} />}</span>}
+      {workspace?.priorities_on && (
+        <span className={PRIORITY_COL}>
+          <PriorityPicker priority={task.priority} onPick={(priority) => updateTask(task.id, { priority })} />
+        </span>
+      )}
       <span className={STATUS_COL}>{showStatus && status && <StatusPicker small status={status} onPick={(id) => setStatus(task, id)} />}</span>
     </>
   )
 }
 
-// Headers line up with TaskColumns. lead is the space taken by whatever sits left of the title.
-export function TaskColumnHeaders({ lead, first = 'Task', className = '' }: { lead: ReactNode; first?: string; className?: string }) {
+// A faint dash that only shows on row hover, so empty cells still look clickable.
+function CellHint() {
+  return <span className="text-faint opacity-0 transition-opacity group-hover:opacity-100">–</span>
+}
+
+export function PriorityPicker({ priority, onPick }: { priority: Priority; onPick: (p: Priority) => void }) {
+  const levels: Priority[] = ['urgent', 'high', 'medium', 'low', 'none']
+  return (
+    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="flex w-full">
+      <Popover
+        align="end"
+        className="block w-full"
+        trigger={({ toggle, open }) => (
+          <button
+            type="button"
+            aria-label={`Priority: ${priority === 'none' ? 'none' : priorityStyles[priority].label}. Change priority`}
+            aria-expanded={open}
+            onClick={toggle}
+            className="flex h-8 w-full items-center text-left focus-visible:outline-none"
+          >
+            {priority === 'none' ? <CellHint /> : <PriorityPill priority={priority} />}
+          </button>
+        )}
+      >
+        {(close) => (
+          <div className="w-40">
+            {levels.map((p) => (
+              <MenuItem
+                key={p}
+                selected={p === priority}
+                onClick={() => {
+                  onPick(p)
+                  close()
+                }}
+              >
+                {p === 'none' ? <span className="text-[13px] text-muted">No priority</span> : <PriorityPill priority={p} />}
+              </MenuItem>
+            ))}
+          </div>
+        )}
+      </Popover>
+    </span>
+  )
+}
+
+// Headers line up with TaskColumns, on the same line as the first group's title (first). lead is the space left of the title.
+export function TaskColumnHeaders({ lead, first, className = '' }: { lead?: ReactNode; first?: ReactNode; className?: string }) {
   const { workspace } = useWorkspace()
   return (
-    <div className={`flex items-center gap-3 text-[12px] text-faint ${className}`}>
+    <div className={`flex items-center gap-3 text-[11px] font-bold tracking-[0.06em] text-faint uppercase ${className}`}>
       {lead}
-      <span className="min-w-0 flex-1">{first}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-1">{first}</div>
       <span className={DUE_COL}>Due</span>
       {workspace?.priorities_on && <span className={PRIORITY_COL}>Priority</span>}
       <span className={STATUS_COL}>Status</span>

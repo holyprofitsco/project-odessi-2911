@@ -37,7 +37,7 @@ export default function ProjectsSettings() {
         </Row>
       </Card>
       <Card>
-        <CardHeader title="Templates" description="Your project templates and the ready-made starters." />
+        <CardHeader title="Templates" description="Your project templates and the ones from Odessi." />
         <CardRow className="py-2.5">
           <Link to="/projects/templates" className="text-sm font-medium hover:underline">
             Open templates ›

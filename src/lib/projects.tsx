@@ -19,6 +19,8 @@ export type Project = {
   start_date: string | null
   due_date: string | null
   launch_date: string | null
+  // What the launch date is called on this project: Launch day, Event day, Go-live day…
+  big_day: string
   about: string
   list_in_order: boolean
   done_at: string | null
@@ -38,6 +40,7 @@ export type Template = {
   description: string
   layout: Layout
   count_from: 'start' | 'launch'
+  big_day: string
   groups: PlanGroup[]
   starter_key: string | null
   used_count: number
@@ -56,9 +59,9 @@ export const layoutInfo: Record<Layout, { label: string; hint: string }> = {
 }
 
 // "Day 4", "Launch day", "3 days before", "2 days after".
-export function whenLabel(offset: number, countFrom: 'start' | 'launch') {
+export function whenLabel(offset: number, countFrom: 'start' | 'launch', bigDay = 'Launch day') {
   if (countFrom === 'start') return `Day ${offset + 1}`
-  if (offset === 0) return 'Launch day'
+  if (offset === 0) return bigDay
   const n = Math.abs(offset)
   return `${n} ${n === 1 ? 'day' : 'days'} ${offset < 0 ? 'before' : 'after'}`
 }
@@ -84,6 +87,7 @@ export type UsePlan = {
   name: string
   layout: Layout
   countFrom: 'start' | 'launch'
+  bigDay?: string
   anchor: string
   clientId: string | null
   groups: PlanGroup[]
@@ -115,7 +119,7 @@ type ProjectsState = StageApi & {
   updateMilestone: (id: string, changes: Partial<Milestone>) => Promise<void>
   deleteMilestone: (id: string) => Promise<void>
   createFromPlan: (plan: UsePlan) => Promise<Project | null>
-  planFromProject: (project: Project) => { groups: PlanGroup[]; countFrom: 'start' | 'launch'; anchor: string }
+  planFromProject: (project: Project) => { groups: PlanGroup[]; countFrom: 'start' | 'launch'; bigDay: string; anchor: string }
   duplicateProject: (project: Project) => Promise<Project | null>
   addTemplate: (t: Partial<Template>) => Promise<Template | null>
   updateTemplate: (id: string, changes: Partial<Template>) => Promise<void>
@@ -350,6 +354,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         client_id: plan.clientId,
         start_date: plan.countFrom === 'start' ? plan.anchor : (allDates[0] ?? plan.anchor),
         launch_date: plan.countFrom === 'launch' ? plan.anchor : null,
+        big_day: plan.bigDay || 'Launch day',
         due_date: last,
         list_in_order: plan.layout === 'list' && groups.some((g) => g.in_order),
       })
@@ -415,15 +420,15 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       } else {
         groups.push({ id: newId(), name: '', offset: 0, in_order: project.list_in_order, items: own.map(item) })
       }
-      return { groups, countFrom, anchor }
+      return { groups, countFrom, bigDay: project.big_day || 'Launch day', anchor }
     },
     [tasksOf, phases, milestones, today],
   )
 
   const duplicateProject = useCallback(
     async (project: Project) => {
-      const { groups, countFrom, anchor } = planFromProject(project)
-      const copy = await createFromPlan({ name: `${project.name || 'Untitled'} (copy)`, layout: project.layout, countFrom, anchor, clientId: project.client_id, groups, skip: new Set(), weekend: 'keep' })
+      const { groups, countFrom, bigDay, anchor } = planFromProject(project)
+      const copy = await createFromPlan({ name: `${project.name || 'Untitled'} (copy)`, layout: project.layout, countFrom, bigDay, anchor, clientId: project.client_id, groups, skip: new Set(), weekend: 'keep' })
       if (copy) await updateProject(copy.id, { about: project.about, due_date: project.due_date, start_date: project.start_date })
       return copy
     },

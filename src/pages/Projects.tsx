@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { StageMenu } from '../components/clientParts'
-import { ClientSelect, keyDateLine, MenuWithHint, ProgressBar, SplitButton, NewProjectModal, TemplateUseModal } from '../components/projectParts'
+import { pointFrom, ProjectMenu, type MenuPoint } from '../components/ContextMenu'
+import { ClientFilter, keyDateLine, MenuWithHint, ProgressBar, SplitButton, NewProjectModal, TemplateUseModal } from '../components/projectParts'
 import { ClockIcon, StatusPill } from '../components/taskParts'
 import { Card, Dropdown, EmptyState } from '../components/ui'
 import { useClients } from '../lib/clients'
@@ -10,7 +11,7 @@ import { useProjects, type Project } from '../lib/projects'
 import { useTasks, type Task } from '../lib/tasks'
 
 type Tab = 'active' | 'done' | 'all'
-type Group = 'type' | 'status' | 'none'
+type Group = 'type' | 'status' | 'client' | 'month' | 'none'
 type Sort = 'due' | 'name' | 'newest'
 
 const readPref = <T extends string>(key: string, fallback: T) => {
@@ -37,14 +38,15 @@ export default function Projects() {
   const [tab, setTab] = useState<Tab>(() => readPref('odessi:projects:tab', 'active'))
   const [group, setGroup] = useState<Group>(() => readPref('odessi:projects:group', 'type'))
   const [sort, setSort] = useState<Sort>(() => readPref('odessi:projects:sort', 'due'))
-  const [client, setClient] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<string[]>([])
+  const [menu, setMenu] = useState<{ project: Project; at: MenuPoint } | null>(null)
   const [fromTemplate, setFromTemplate] = useState(false)
   const [creating, setCreating] = useState(false)
 
   if (loading) return null
   const behavior = (p: Project) => statusById(p.status_id)?.behavior
   const dueOf = (p: Project) => p.due_date ?? p.launch_date
-  const inTab = projects.filter((p) => (tab === 'all' ? true : tab === 'done' ? behavior(p) === 'done' : behavior(p) === 'open') && (!client || p.client_id === client))
+  const inTab = projects.filter((p) => (tab === 'all' ? true : tab === 'done' ? behavior(p) === 'done' : behavior(p) === 'open') && (chosen.length === 0 || (p.client_id !== null && chosen.includes(p.client_id))))
   const sorters: Record<Sort, (a: Project, b: Project) => number> = {
     due: (a, b) => (dueOf(a) ?? '9999').localeCompare(dueOf(b) ?? '9999'),
     name: (a, b) => a.name.localeCompare(b.name),
@@ -57,7 +59,52 @@ export default function Projects() {
     push('client', 'Client work', list.filter((p) => p.kind === 'client'))
     push('mine', 'My business', list.filter((p) => p.kind !== 'client'))
   } else if (group === 'status') {
-    for (const s of statuses) push(s.id, s.name, list.filter((p) => p.status_id === s.id))
+    for (const s of statuses)
+      push(
+        s.id,
+        s.name,
+        list.filter((p) => p.status_id === s.id),
+      )
+  } else if (group === 'client') {
+    const named = [...clients].sort((a, b) => a.name.localeCompare(b.name))
+    for (const c of named)
+      push(
+        c.id,
+        c.name || 'Untitled',
+        list.filter((p) => p.client_id === c.id),
+      )
+    push(
+      'none',
+      'No client',
+      list.filter((p) => !p.client_id || !clients.some((c) => c.id === p.client_id)),
+    )
+  } else if (group === 'month') {
+    // Months in date order, with this year's months named plainly and other years spelled out.
+    const months = [
+      ...new Set(
+        list
+          .map(dueOf)
+          .filter((d): d is string => !!d)
+          .map((d) => d.slice(0, 7)),
+      ),
+    ].sort()
+    for (const m of months) {
+      const [y, mo] = m.split('-').map(Number)
+      const name = new Date(Date.UTC(y, mo - 1, 1)).toLocaleString('en-US', {
+        month: 'long',
+        timeZone: 'UTC',
+      })
+      push(
+        m,
+        y === Number(today.slice(0, 4)) ? name : `${name} ${y}`,
+        list.filter((p) => dueOf(p)?.startsWith(m)),
+      )
+    }
+    push(
+      'none',
+      'No due date',
+      list.filter((p) => !dueOf(p)),
+    )
   } else push('all', '', list)
 
   const yearStart = `${today.slice(0, 4)}-01-01`
@@ -131,8 +178,10 @@ export default function Projects() {
           label="Group by"
           value={group}
           options={[
-            { value: 'type', label: 'Type' },
             { value: 'status', label: 'Status' },
+            { value: 'client', label: 'Client' },
+            { value: 'type', label: 'Type' },
+            { value: 'month', label: 'Due month' },
             { value: 'none', label: 'None' },
           ]}
           onChange={(g) => {
@@ -141,7 +190,7 @@ export default function Projects() {
           }}
         />
         <span className="ml-2" />
-        <ClientSelect value={client} onChange={setClient} clients={clients} />
+        <ClientFilter value={chosen} onChange={setChosen} clients={clients} />
         <span className="ml-2 text-[13px] text-muted">Sort by:</span>
         <Dropdown
           label="Sort by"
@@ -160,7 +209,7 @@ export default function Projects() {
 
       {sections.length === 0 ? (
         <EmptyState
-          title={tab === 'done' ? 'No finished projects yet' : client ? 'No projects for this client yet' : 'No projects yet'}
+          title={tab === 'done' ? 'No finished projects yet' : chosen.length ? `No projects for ${chosen.length === 1 ? 'this client' : 'these clients'} yet` : 'No projects yet'}
           description={tab === 'done' ? 'When you set a project to Done, it lands here.' : 'Start one from scratch, or from a template with the phases and dates already set up.'}
         />
       ) : (
@@ -197,12 +246,13 @@ export default function Projects() {
                       role="button"
                       tabIndex={0}
                       onClick={() => navigate(`/projects/${p.id}`)}
+                      onContextMenu={(e) => setMenu({ project: p, at: pointFrom(e) })}
                       onKeyDown={(e) => e.key === 'Enter' && navigate(`/projects/${p.id}`)}
-                      className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(0,1fr)_150px_220px_140px_110px] items-center gap-4 border-divider px-[18px] py-2 hover:bg-[#F1F1F4] [&+&]:border-t"
+                      className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(0,1fr)_150px_220px_140px_110px] items-center gap-4 border-divider px-[18px] py-2 hover:bg-hover [&+&]:border-t"
                     >
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate text-sm font-medium">{p.name || 'Untitled project'}</span>
-                        <span className="truncate text-xs text-muted">{owner?.name ?? keyDateLine(p, today)}</span>
+                        <span className="truncate text-xs text-muted">{group === 'client' ? keyDateLine(p, today) : (owner?.name ?? keyDateLine(p, today))}</span>
                       </span>
                       <ProgressBar done={prog.done} total={prog.total} />
                       <span className="truncate text-[13px] text-muted">
@@ -219,7 +269,12 @@ export default function Projects() {
                       </span>
                       <span className="text-[13px]">
                         {late > 0 ? (
-                          <span className="inline-flex items-center gap-1 font-medium" style={{ color: late >= 7 ? '#B3261E' : late >= 3 ? '#9A5530' : '#6B5E52' }}>
+                          <span
+                            className="inline-flex items-center gap-1 font-medium"
+                            style={{
+                              color: late >= 7 ? '#B3261E' : late >= 3 ? '#9A5530' : '#6B5E52',
+                            }}
+                          >
                             <ClockIcon /> Past due · {late} {late === 1 ? 'day' : 'days'}
                           </span>
                         ) : due ? (
@@ -249,6 +304,7 @@ export default function Projects() {
 
       <TemplateUseModal open={fromTemplate} onClose={() => setFromTemplate(false)} />
       {creating && <NewProjectModal open onClose={() => setCreating(false)} />}
+      {menu && <ProjectMenu project={menu.project} at={menu.at} onClose={() => setMenu(null)} />}
     </div>
   )
 }

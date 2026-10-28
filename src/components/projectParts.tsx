@@ -10,7 +10,8 @@ import { Avatar } from './clientParts'
 import { GripIcon } from './icons'
 import { DatePicker, Floating } from './pickers'
 import { Checkbox, TaskColumnHeaders, TaskColumns } from './taskParts'
-import { Button, MenuItem, Modal, Popover } from './ui'
+import { pointFrom, TaskMenu, type MenuPoint } from './ContextMenu'
+import { Button, Dropdown, MenuItem, Modal, Popover } from './ui'
 
 /* Progress: a thin bar with "7 of 12". */
 
@@ -81,7 +82,11 @@ export function useTaskSearch() {
     const here = opts.projectId ? found.filter((t) => t.project_id === opts.projectId) : []
     const elsewhere = found.filter((t) => !here.includes(t))
     const sortQ = (a: Task, b: Task) => Number(b.title.toLowerCase().startsWith(q)) - Number(a.title.toLowerCase().startsWith(q))
-    return { here: here.sort(sortQ).slice(0, 6), elsewhere: elsewhere.sort(sortQ).slice(0, 6), where }
+    return {
+      here: here.sort(sortQ).slice(0, 6),
+      elsewhere: elsewhere.sort(sortQ).slice(0, 6),
+      where,
+    }
   }
 }
 
@@ -129,48 +134,64 @@ export function ProjectTaskRow({
   const open = (t: Task) => !['done', 'canceled'].includes(statusById(t.status_id)?.behavior ?? '')
   const blocker = blockersOf(task.id).find(open)
   const holding = holdingUp(task.id).find(open)
-  const line = status?.behavior === 'waiting' ? { text: `Waiting${task.waiting_on_text ? ` on ${task.waiting_on_text.replace(/@/g, '')}` : ''}`, warm: true } : blocker && !done ? { text: `Can't start until ${blocker.title}`, warm: false } : holding && !done ? { text: `Holding up · ${holding.title}`, warm: false } : null
+  const [menu, setMenu] = useState<MenuPoint | null>(null)
+  const line =
+    status?.behavior === 'waiting'
+      ? {
+          text: `Waiting${task.waiting_on_text ? ` on ${task.waiting_on_text.replace(/@/g, '')}` : ''}`,
+          warm: true,
+        }
+      : blocker && !done
+        ? { text: `Can't start until ${blocker.title}`, warm: true }
+        : holding && !done
+          ? { text: `Holding up · ${holding.title}`, warm: false }
+          : null
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/plain', task.id)
-        onDragStart()
-      }}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        onDropOn()
-      }}
-      onClick={() => onOpen(task.id)}
-      onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className={`group flex min-h-[50px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-2.5 hover:bg-[#F1F1F4] focus-visible:bg-[#F1F1F4] focus-visible:outline-none [&+&]:border-t ${dragging ? 'opacity-40' : ''}`}
-    >
-      {/* Step numbers give way to the drag dots on hover, so in-order tasks can still be dragged. */}
-      <span className="flex w-5 shrink-0 justify-center text-faint" title="Drag to reorder">
-        {step && <span className="text-xs font-semibold text-muted group-hover:hidden">{step}</span>}
-        <span className={`cursor-grab ${step ? 'hidden group-hover:inline' : 'opacity-0 group-hover:opacity-100'}`}>
-          <GripIcon />
-        </span>
-      </span>
-      <Checkbox
-        checked={done}
-        label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`}
-        onChange={() => {
-          const target = done ? firstOpenStatus : statuses.find((s) => s.behavior === 'done')
-          if (target) setStatus(task, target.id)
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        onContextMenu={(e) => setMenu(pointFrom(e))}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', task.id)
+          onDragStart()
         }}
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
-        {line && <span className={`truncate text-xs ${line.warm ? 'text-waiting' : 'text-faint'}`}>{line.text}</span>}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onDropOn()
+        }}
+        onClick={() => onOpen(task.id)}
+        onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
+        className={`group flex min-h-[50px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-2.5 hover:bg-hover focus-visible:bg-hover focus-visible:outline-none [&+&]:border-t ${dragging ? 'opacity-40' : ''}`}
+      >
+        {/* Step numbers give way to the drag dots on hover, so in-order tasks can still be dragged. */}
+        <span className="flex w-5 shrink-0 justify-center text-faint" title="Drag to reorder">
+          {step && <span className="text-xs font-semibold text-muted group-hover:hidden">{step}</span>}
+          <span className={`cursor-grab ${step ? 'hidden group-hover:inline' : 'opacity-0 group-hover:opacity-100'}`}>
+            <GripIcon />
+          </span>
+        </span>
+        <Checkbox
+          checked={done}
+          label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`}
+          onChange={() => {
+            const target = done ? firstOpenStatus : statuses.find((s) => s.behavior === 'done')
+            if (target) setStatus(task, target.id)
+          }}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
+          {line && <span className={`truncate text-xs ${line.warm ? 'text-waiting' : 'text-faint'}`}>{line.text}</span>}
+        </div>
+        <TaskColumns task={task} />
       </div>
-      <TaskColumns task={task} />
-    </div>
+      {/* Outside the row, so clicks in the menu don't open the task. */}
+      {menu && <TaskMenu task={task} at={menu} onClose={() => setMenu(null)} onOpen={() => onOpen(task.id)} />}
+    </>
   )
 }
 
@@ -214,7 +235,10 @@ export function AddTaskLine({ label, onAdd }: { label: string; onAdd: (title: st
 
 export const orderInfo = {
   any: { label: 'Any order', hint: 'Do these tasks whenever you like.' },
-  in: { label: 'In order', hint: 'Each task waits for the one above it. Steps get numbers, and only the next one shows up in Today.' },
+  in: {
+    label: 'In order',
+    hint: 'Each task waits for the one above it, and steps get numbers. Tasks still show in Today on their due date.',
+  },
 }
 
 export function OrderPicker({ inOrder, onChange }: { inOrder: boolean; onChange: (v: boolean) => void }) {
@@ -312,31 +336,41 @@ export function ProjectPicker({ value, onPick }: { value: string | null; onPick:
 
 function Include({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
   return (
-    <button type="button" role="checkbox" aria-checked={checked} aria-label={label} onClick={onChange} className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border-[1.5px] text-[10px] leading-none text-white ${checked ? 'border-ink bg-ink' : 'border-[#C4C4CA] bg-surface'}`}>
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={onChange}
+      className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border-[1.5px] text-[10px] leading-none text-white ${checked ? 'border-accent bg-accent' : 'border-[#C4C4CA] bg-surface'}`}
+    >
       {checked && '✓'}
     </button>
   )
 }
 
-/* Weekend nudge for a preview: "2 tasks land on a weekend." */
+/* Weekend line for a preview: "3 tasks land on a weekend. [Keep them there ▾]" Quiet, since keeping them is fine too. */
 
-function WeekendNudge({ count, value, onChange }: { count: number; value: WeekendChoice; onChange: (v: WeekendChoice) => void }) {
+function WeekendLine({ count, value, onChange }: { count: number; value: WeekendChoice; onChange: (v: WeekendChoice) => void }) {
   if (!count) return null
-  const opts: [WeekendChoice, string][] = [
-    ['keep', 'Keep it'],
-    ['friday', 'Move to Friday'],
-    ['monday', 'Move to Monday'],
-  ]
   return (
-    <div className="flex items-center gap-1.5 rounded-xl bg-[#FDF5EC] px-3.5 py-2.5 text-[13px]">
-      <span className="flex-1 font-medium text-waiting">
+    <div className="flex items-center gap-2 text-[13px] text-muted">
+      <span>
         {count} {count === 1 ? 'task lands' : 'tasks land'} on a weekend.
       </span>
-      {opts.map(([v, label]) => (
-        <button key={v} type="button" aria-pressed={value === v} onClick={() => onChange(v)} className={`h-7 rounded-lg px-2 text-xs font-medium whitespace-nowrap ${value === v ? 'bg-ink text-white' : 'bg-surface text-ink hover:bg-divider'}`}>
-          {label}
-        </button>
-      ))}
+      <Dropdown
+        label="Weekend tasks"
+        value={value}
+        options={[
+          {
+            value: 'keep',
+            label: count === 1 ? 'Keep it there' : 'Keep them there',
+          },
+          { value: 'friday', label: 'Move to Friday' },
+          { value: 'monday', label: 'Move to Monday' },
+        ]}
+        onChange={onChange}
+      />
     </div>
   )
 }
@@ -347,7 +381,27 @@ function defaultWeekend(rule: string | undefined): WeekendChoice {
 
 /* Plan preview: a calm list of every group and task with its real date, and checkboxes to skip what you don't need this time. */
 
-function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend, today }: { groups: PlanGroup[]; layout: Layout; countFrom: 'start' | 'launch'; anchor: string; skip: Set<string>; setSkip: (s: Set<string>) => void; weekend: WeekendChoice; today: string }) {
+function PlanPreview({
+  groups,
+  layout,
+  countFrom,
+  bigDay,
+  anchor,
+  skip,
+  setSkip,
+  weekend,
+  today,
+}: {
+  groups: PlanGroup[]
+  layout: Layout
+  countFrom: 'start' | 'launch'
+  bigDay?: string
+  anchor: string
+  skip: Set<string>
+  setSkip: (s: Set<string>) => void
+  weekend: WeekendChoice
+  today: string
+}) {
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(groups.map((g) => g.id)))
   const toggle = (id: string) => {
     const next = new Set(skip)
@@ -391,7 +445,7 @@ function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend
                     <Include checked={!skip.has(i.id)} label={`${skip.has(i.id) ? 'Include' : 'Skip'} ${i.title}`} onChange={() => toggle(i.id)} />
                     {g.in_order && <span className="w-4 text-xs font-semibold text-muted">{ii + 1}</span>}
                     <span className={`min-w-0 flex-1 truncate text-[13px] ${skip.has(i.id) ? 'text-faint line-through' : ''}`}>{i.title}</span>
-                    <span className="w-28 text-right text-xs text-muted" title={whenLabel(i.offset, countFrom)}>
+                    <span className="w-28 text-right text-xs text-muted" title={whenLabel(i.offset, countFrom, bigDay)}>
                       {when(i)}
                     </span>
                   </div>
@@ -408,7 +462,7 @@ function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend
 const weekendCount = (groups: PlanGroup[], skip: Set<string>, anchor: string) =>
   groups.filter((g) => !skip.has(g.id)).reduce((n, g) => n + g.items.filter((i) => !skip.has(i.id) && isWeekend(landDate(anchor, i.offset, 'keep'))).length, 0)
 
-/* "From a template…": your templates, then the starters. Preview on the right, Create project at the bottom. */
+/* "From a template…": your templates, then the ones from Odessi. Preview on the right, Create project at the bottom. */
 
 type Source = (Template & { starter?: false }) | (Starter & { id: string; starter: true; used_count: 0 })
 
@@ -416,7 +470,12 @@ export function useTemplateSources() {
   const { templates } = useProjects()
   return useMemo(() => {
     const mine: Source[] = [...templates].sort((a, b) => b.used_count - a.used_count || a.name.localeCompare(b.name))
-    const ready: Source[] = starters.map((s) => ({ ...s, id: `starter:${s.key}`, starter: true as const, used_count: 0 as const }))
+    const ready: Source[] = starters.map((s) => ({
+      ...s,
+      id: `starter:${s.key}`,
+      starter: true as const,
+      used_count: 0 as const,
+    }))
     return { mine, ready, all: [...mine, ...ready] }
   }, [templates])
 }
@@ -442,41 +501,65 @@ function TemplateUseInner({ onClose, initialId, clientId }: { onClose: () => voi
   const [skip, setSkip] = useState<Set<string>>(new Set())
   const [weekend, setWeekend] = useState<WeekendChoice>(defaultWeekend(workspace?.weekend_rule))
   const [busy, setBusy] = useState(false)
+  // Until you pick a date yourself, each template gets its own sensible one.
+  const [dateTouched, setDateTouched] = useState(false)
 
   const pick = (s: Source) => {
     setPickedId(s.id)
     setName(s.name)
     setSkip(new Set())
-    if (s.count_from !== picked?.count_from) setAnchor(anchorFor(s))
+    if (!dateTouched || s.count_from !== picked?.count_from) setAnchor(anchorFor(s))
   }
-  const count = picked ? planCount(picked.groups.filter((g) => !skip.has(g.id)).map((g) => ({ ...g, items: g.items.filter((i) => !skip.has(i.id)) }))) : 0
+  const count = picked
+    ? planCount(
+        picked.groups
+          .filter((g) => !skip.has(g.id))
+          .map((g) => ({
+            ...g,
+            items: g.items.filter((i) => !skip.has(i.id)),
+          })),
+      )
+    : 0
   const weekendHits = picked ? weekendCount(picked.groups, skip, anchor) : 0
 
   const create = async () => {
     if (!picked) return
     setBusy(true)
-    const project = await createFromPlan({ name: name.trim() || picked.name, layout: picked.layout, countFrom: picked.count_from, anchor, clientId: client, groups: picked.groups, skip, weekend })
+    const project = await createFromPlan({
+      name: name.trim() || picked.name,
+      layout: picked.layout,
+      countFrom: picked.count_from,
+      bigDay: picked.big_day,
+      anchor,
+      clientId: client,
+      groups: picked.groups,
+      skip,
+      weekend,
+    })
     if (project && !picked.starter) await markTemplateUsed(picked.id)
     setBusy(false)
     onClose()
     if (project) navigate(`/projects/${project.id}`)
   }
 
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const fits = (s: Source) => !q || s.name.toLowerCase().includes(q)
+  const size = (s: Source) => `${s.groups.length} ${s.layout === 'milestones' ? 'milestones' : s.layout === 'phases' ? 'phases' : 'groups'} · ${planCount(s.groups)} tasks`
   const side = (s: Source) => (
-    <button key={s.id} type="button" onClick={() => pick(s)} className={`flex flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left ${s.id === pickedId ? 'bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.08)]' : 'hover:bg-divider'}`}>
-      <span className="text-[13px] font-medium">{s.name || 'Untitled template'}</span>
-      <span className="text-xs text-muted">
-        {layoutInfo[s.layout].label} · {s.count_from === 'launch' ? 'counts back from launch day' : `${planCount(s.groups)} tasks`}
-        {!s.starter && s.used_count > 0 && ` · Used ${s.used_count === 1 ? 'once' : `${s.used_count} times`}`}
-      </span>
+    <button key={s.id} type="button" onClick={() => pick(s)} className={`flex flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left ${s.id === pickedId ? 'bg-accent-tint' : 'hover:bg-divider'}`}>
+      <span className={`text-[13px] ${s.id === pickedId ? 'font-semibold' : 'font-medium'}`}>{s.name || 'Untitled template'}</span>
+      <span className="text-xs text-muted">{size(s)}</span>
     </button>
   )
-  const label = (text: string) => <span className="px-2.5 pt-2 text-[10px] font-bold tracking-[0.08em] text-faint uppercase">{text}</span>
+  const label = (text: string) => <span className="px-2.5 pt-3 pb-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">{text}</span>
+  const field = 'flex min-w-0 flex-col gap-1.5'
+  const fieldLabel = 'text-xs font-medium text-muted'
 
   return (
     <Modal
       open
-      wide
+      large
       onClose={onClose}
       title="Start from a template"
       footer={
@@ -485,37 +568,60 @@ function TemplateUseInner({ onClose, initialId, clientId }: { onClose: () => voi
           <div className="flex gap-2">
             <Button onClick={onClose}>Cancel</Button>
             <Button variant="primary" disabled={!picked || busy || count === 0} onClick={create}>
-              Create project
+              Create project{count ? ` with ${count} tasks` : ''}
             </Button>
           </div>
         </>
       }
     >
-      <div className="-mx-2 grid grid-cols-[200px_minmax(0,1fr)] gap-4">
-        <div className="flex flex-col gap-0.5 rounded-xl bg-canvas p-1.5">
-          {mine.length > 0 && label('Your templates')}
-          {mine.map(side)}
-          {label('Starters')}
-          {ready.map(side)}
+      <div className="-mx-2 grid min-h-[480px] grid-cols-[230px_minmax(0,1fr)] gap-6">
+        <div className="flex flex-col border-r border-divider pr-4">
+          <input
+            aria-label="Search templates"
+            placeholder="Search templates"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-9 rounded-lg border-[1.5px] border-field px-2.5 text-[13px] focus:border-ink focus:outline-none"
+          />
+          <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
+            {mine.filter(fits).length > 0 && label('Your templates')}
+            {mine.filter(fits).map(side)}
+            {ready.filter(fits).length > 0 && label('From Odessi')}
+            {ready.filter(fits).map(side)}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              onClose()
+              navigate('/projects/templates')
+            }}
+            className="mt-2 w-fit rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink"
+          >
+            Manage templates ›
+          </button>
         </div>
         {picked && (
-          <div className="flex min-w-0 flex-col gap-3">
-            <div className="flex flex-col gap-2 text-[13px]">
-              <label className="flex items-center gap-3">
-                <span className="w-24 text-muted">Project name</span>
-                <input value={name} onChange={(e) => setName(e.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border-[1.5px] border-field px-2.5 focus:outline-none" />
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-base font-semibold">{picked.name}</span>
+              {picked.description && <span className="text-[13px] text-muted">{picked.description}</span>}
+            </div>
+            <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
+              <label className={field}>
+                <span className={fieldLabel}>Project name</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} className="h-9 min-w-0 rounded-lg border-[1.5px] border-field px-2.5 text-[13px] focus:border-ink focus:outline-none" />
               </label>
-              <div className="flex items-center gap-3">
-                <span className="w-24 text-muted">Client</span>
+              <div className={field}>
+                <span className={fieldLabel}>Client</span>
                 <ClientSelect value={client} onChange={setClient} clients={clients} />
               </div>
-              <div className="flex items-center gap-3">
-                <span className="w-24 text-muted">{picked.count_from === 'launch' ? 'Launch day' : 'Start date'}</span>
-                <DatePicker label={picked.count_from === 'launch' ? 'Launch day' : 'Start date'} value={anchor} today={today} weekStart={workspace?.week_start} onChange={(d) => d && setAnchor(d)} />
+              <div className={field}>
+                <span className={fieldLabel}>{picked.count_from === 'launch' ? (picked.big_day ?? 'Launch day') : 'Project starts'}</span>
+                <DatePicker label={picked.count_from === 'launch' ? (picked.big_day ?? 'Launch day') : 'Project starts'} value={anchor} today={today} weekStart={workspace?.week_start} onChange={(d) => d && (setAnchor(d), setDateTouched(true))} />
               </div>
             </div>
-            <PlanPreview key={picked.id} groups={picked.groups} layout={picked.layout} countFrom={picked.count_from} anchor={anchor} skip={skip} setSkip={setSkip} weekend={weekend} today={today} />
-            <WeekendNudge count={weekendHits} value={weekend} onChange={setWeekend} />
+            <PlanPreview key={picked.id} groups={picked.groups} layout={picked.layout} countFrom={picked.count_from} bigDay={picked.big_day} anchor={anchor} skip={skip} setSkip={setSkip} weekend={weekend} today={today} />
+            <WeekendLine count={weekendHits} value={weekend} onChange={setWeekend} />
           </div>
         )}
       </div>
@@ -580,6 +686,67 @@ export function ClientSelect({ value, onChange, clients }: { value: string | nul
   )
 }
 
+/* Filter by client on Projects: pick as many as you like. The menu stays open so you can tick several. */
+
+export function ClientFilter({ value, onChange, clients }: { value: string[]; onChange: (ids: string[]) => void; clients: ReturnType<typeof useClients>['clients'] }) {
+  const [query, setQuery] = useState('')
+  const shown = clients.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 30)
+  const first = clients.find((c) => c.id === value[0])
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+  return (
+    <Popover
+      trigger={({ toggle: open, open: isOpen }) => (
+        <button
+          type="button"
+          aria-label="Filter by client"
+          aria-expanded={isOpen}
+          onClick={open}
+          className={`flex h-9 max-w-56 items-center gap-2 rounded-lg border-[1.5px] px-2.5 text-[13px] font-medium whitespace-nowrap ${value.length ? 'border-accent bg-accent-tint' : 'border-field bg-surface hover:bg-divider'}`}
+        >
+          {value.length === 0 ? (
+            <span className="text-muted">All clients</span>
+          ) : value.length === 1 && first ? (
+            <>
+              <Avatar name={first.name} business={first.kind === 'business'} size={20} photo={first.photo_url} />
+              <span className="truncate">{first.name}</span>
+            </>
+          ) : (
+            <span>{value.length} clients</span>
+          )}{' '}
+          ▾
+        </button>
+      )}
+    >
+      {() => (
+        <div className="flex w-64 flex-col gap-1 p-1">
+          <input autoFocus aria-label="Search clients" placeholder="Search clients" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 rounded-lg border-[1.5px] border-field px-2 text-[13px] focus:outline-none" />
+          <div className="flex max-h-56 flex-col overflow-y-auto">
+            {shown.map((c) => {
+              const on = value.includes(c.id)
+              return (
+                <button key={c.id} type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => toggle(c.id)} className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] hover:bg-hover">
+                  <span className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border-[1.5px] text-[10px] leading-none text-white ${on ? 'border-accent bg-accent' : 'border-[#C4C4CA] bg-surface'}`}>{on && '✓'}</span>
+                  <Avatar name={c.name} business={c.kind === 'business'} size={20} photo={c.photo_url} />
+                  <span className="truncate">{c.name || 'Untitled'}</span>
+                </button>
+              )
+            })}
+            {shown.length === 0 && <span className="px-2.5 py-1.5 text-xs text-muted">No clients match.</span>}
+          </div>
+          {value.length > 0 && (
+            <>
+              <div className="border-t border-divider" />
+              <MenuItem onClick={() => onChange([])}>
+                <span className="text-muted">Clear selections</span>
+              </MenuItem>
+            </>
+          )}
+        </div>
+      )}
+    </Popover>
+  )
+}
+
 /* "From a task set…": pick a start date, see real dates, uncheck tasks to skip. */
 
 export function TaskSetUseModal({ set, onClose, extra, onDone }: { set: TaskSet | null; onClose: () => void; extra?: Partial<Task>; onDone?: () => void }) {
@@ -594,7 +761,15 @@ function TaskSetUseInner({ set, onClose, extra, onDone }: { set: TaskSet; onClos
   const [skip, setSkip] = useState<Set<string>>(new Set())
   const [weekend, setWeekend] = useState<WeekendChoice>(defaultWeekend(workspace?.weekend_rule))
   const [busy, setBusy] = useState(false)
-  const groups: PlanGroup[] = [{ id: set.id, name: set.name, offset: 0, in_order: set.in_order, items: set.items }]
+  const groups: PlanGroup[] = [
+    {
+      id: set.id,
+      name: set.name,
+      offset: 0,
+      in_order: set.in_order,
+      items: set.items,
+    },
+  ]
   const count = set.items.filter((i) => !skip.has(i.id)).length
   return (
     <Modal
@@ -624,14 +799,14 @@ function TaskSetUseInner({ set, onClose, extra, onDone }: { set: TaskSet; onClos
         </>
       }
     >
-      <div className="flex flex-col gap-3">
-        {set.description && <p className="text-[13px] text-muted">{set.description}</p>}
-        <div className="flex items-center gap-3 text-[13px]">
-          <span className="w-24 text-muted">Start date</span>
-          <DatePicker label="Start date" value={start} today={today} weekStart={workspace?.week_start} onChange={(d) => d && setStart(d)} />
+      <div className="flex flex-col gap-4">
+        {set.description && <p className="-mt-1 text-[13px] text-muted">{set.description}</p>}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted">First task lands on</span>
+          <DatePicker label="First task lands on" value={start} today={today} weekStart={workspace?.week_start} onChange={(d) => d && setStart(d)} />
         </div>
         <PlanPreview groups={groups} layout="list" countFrom="start" anchor={start} skip={skip} setSkip={setSkip} weekend={weekend} today={today} />
-        <WeekendNudge count={weekendCount(groups, skip, start)} value={weekend} onChange={setWeekend} />
+        <WeekendLine count={weekendCount(groups, skip, start)} value={weekend} onChange={setWeekend} />
       </div>
     </Modal>
   )
@@ -648,7 +823,7 @@ export function TaskSetMenu({ onPick, onManage }: { onPick: (s: TaskSet) => void
         <MenuWithHint key={s.id} title={s.name || 'Untitled set'} hint={`${s.items.length} ${s.items.length === 1 ? 'task' : 'tasks'}${s.used_count ? ` · Used ${s.used_count === 1 ? 'once' : `${s.used_count} times`}` : ''}`} onClick={() => onPick(s)} />
       ))}
       {sets.length > 0 && <div className="my-1 border-t border-divider" />}
-      <span className="px-2.5 pt-1.5 pb-0.5 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Starters</span>
+      <span className="px-2.5 pt-1.5 pb-0.5 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">From Odessi</span>
       {setStarters
         .filter((st) => !taskSets.some((s) => s.name === st.name))
         .map((st) => (
@@ -668,7 +843,11 @@ export function SaveAsTaskSetModal({ tasks: list, inOrder, onClose }: { tasks: T
   const [name, setName] = useState('')
   if (!list) return null
   const save = async () => {
-    const set = await addTaskSet({ name: name.trim() || 'New task set', items: planFromTasks(list), in_order: !!inOrder })
+    const set = await addTaskSet({
+      name: name.trim() || 'New task set',
+      items: planFromTasks(list),
+      in_order: !!inOrder,
+    })
     onClose()
     setName('')
     if (set) navigate(`/tasks/sets?set=${set.id}`)
@@ -706,7 +885,7 @@ export function useProjectName() {
 }
 
 export function keyDateLine(p: Project, today: string) {
-  if (p.launch_date) return `Launch day ${shortDate(p.launch_date, today)}`
+  if (p.launch_date) return `${p.big_day || 'Launch day'} ${shortDate(p.launch_date, today)}`
   return ''
 }
 
@@ -736,14 +915,21 @@ export function NewProjectModal({ open, onClose, clientId }: { open: boolean; on
 
   const create = async () => {
     setBusy(true)
-    const p = await addProject({ name: name.trim(), kind, client_id: kind === 'client' ? client : null, layout, start_date: start, ...(launch ? { launch_date: end } : { due_date: end }) })
+    const p = await addProject({
+      name: name.trim(),
+      kind,
+      client_id: kind === 'client' ? client : null,
+      layout,
+      start_date: start,
+      ...(launch ? { launch_date: end } : { due_date: end }),
+    })
     setBusy(false)
     if (!p) return
     onClose()
     navigate(`/projects/${p.id}`)
   }
 
-  const choice = (on: boolean) => `flex flex-1 flex-col gap-0.5 rounded-xl border-[1.5px] px-3.5 py-2.5 text-left ${on ? 'border-ink bg-surface' : 'border-field hover:border-[#C4C4CA]'}`
+  const choice = (on: boolean) => `flex flex-1 flex-col gap-0.5 rounded-xl border-[1.5px] px-3.5 py-2.5 text-left ${on ? 'border-accent bg-accent-tint' : 'border-field hover:border-[#C4C4CA]'}`
   const label = 'text-[13px] font-semibold'
 
   return (

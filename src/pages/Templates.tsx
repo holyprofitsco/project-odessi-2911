@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { InlineText } from '../components/clientParts'
-import { PlanRows, WhenControl } from '../components/PlanEditor'
+import { BigDayPicker, PlanRows, WhenControl } from '../components/PlanEditor'
 import { OrderPicker, TemplateUseModal, useTemplateSources } from '../components/projectParts'
 import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover } from '../components/ui'
 import { shortDate } from '../lib/dates'
@@ -16,7 +16,7 @@ const sizeLine = (layout: Layout, groups: PlanGroup[]) => {
   return `${n} ${layout === 'phases' ? (n === 1 ? 'phase' : 'phases') : n === 1 ? 'milestone' : 'milestones'} · ${tasks}`
 }
 
-/* Manage templates: your own first, then the starters. Every row has the same three slots. */
+/* Manage templates: your own first, then the ones from Odessi. Every row has the same three slots. */
 
 export default function Templates() {
   const { addTemplate, deleteTemplate, today } = useProjects()
@@ -30,17 +30,36 @@ export default function Templates() {
   const match = (s: { name: string; description: string }) => !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
   const order = <T extends { name: string; used_count: number }>(list: T[]) => [...list].sort(sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.used_count - a.used_count || a.name.localeCompare(b.name))
   const yours = order(mine.filter(match)) as Template[]
-  const starts = order(ready.filter(match)) as (typeof starters[number] & { id: string; used_count: number })[]
+  const starts = order(ready.filter(match)) as ((typeof starters)[number] & {
+    id: string
+    used_count: number
+  })[]
 
   const customize = async (key: string) => {
     const s = starters.find((x) => x.key === key)
     if (!s) return
-    const t = await addTemplate({ name: s.name, description: s.description, layout: s.layout, count_from: s.count_from, groups: s.groups.map((g) => ({ ...g, id: newId(), items: g.items.map((i) => ({ ...i, id: newId() })) })), starter_key: s.key })
+    const t = await addTemplate({
+      name: s.name,
+      description: s.description,
+      layout: s.layout,
+      count_from: s.count_from,
+      big_day: s.big_day ?? 'Launch day',
+      groups: s.groups.map((g) => ({
+        ...g,
+        id: newId(),
+        items: g.items.map((i) => ({ ...i, id: newId() })),
+      })),
+      starter_key: s.key,
+    })
     if (t) navigate(`/projects/templates/${t.id}?new=1`)
   }
   const blank = async () => {
     const layout = 'phases'
-    const t = await addTemplate({ name: 'New template', layout, groups: [{ id: newId(), name: 'Phase 1', offset: 0, in_order: false, items: [] }] })
+    const t = await addTemplate({
+      name: 'New template',
+      layout,
+      groups: [{ id: newId(), name: 'Phase 1', offset: 0, in_order: false, items: [] }],
+    })
     if (t) navigate(`/projects/templates/${t.id}?new=1`)
   }
 
@@ -125,7 +144,7 @@ export default function Templates() {
 
       <div className="flex flex-col gap-1.5">
         <h2 className="px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">
-          Starters · {starts.length} <span className="font-medium tracking-normal normal-case">· ready-made, customize to make them yours</span>
+          From Odessi · {starts.length} <span className="font-medium tracking-normal normal-case">· customize any of them to make it yours</span>
         </h2>
         <Card>
           {starts.map((s) => (
@@ -232,15 +251,32 @@ function Editor({ t }: { t: Template }) {
     // A task list is one group. Going to phases or milestones starts from that one group.
     const groups =
       layout === 'list'
-        ? [{ id: newId(), name: '', offset: 0, in_order: t.groups.some((g) => g.in_order), items: t.groups.flatMap((g) => g.items) }]
+        ? [
+            {
+              id: newId(),
+              name: '',
+              offset: 0,
+              in_order: t.groups.some((g) => g.in_order),
+              items: t.groups.flatMap((g) => g.items),
+            },
+          ]
         : isList
-          ? t.groups.map((g) => ({ ...g, name: layout === 'phases' ? 'Phase 1' : 'Milestone 1' }))
+          ? t.groups.map((g) => ({
+              ...g,
+              name: layout === 'phases' ? 'Phase 1' : 'Milestone 1',
+            }))
           : t.groups
     setOpenIds(new Set(groups.map((g) => g.id)))
     save({ layout, groups })
   }
   const addGroup = () => {
-    const g: PlanGroup = { id: newId(), name: t.layout === 'phases' ? `Phase ${t.groups.length + 1}` : 'New milestone', offset: t.groups.at(-1)?.offset ?? 0, in_order: false, items: [] }
+    const g: PlanGroup = {
+      id: newId(),
+      name: t.layout === 'phases' ? `Phase ${t.groups.length + 1}` : 'New milestone',
+      offset: t.groups.at(-1)?.offset ?? 0,
+      in_order: false,
+      items: [],
+    }
     setOpenIds(new Set([...openIds, g.id]))
     setGroups([...t.groups, g])
   }
@@ -284,7 +320,14 @@ function Editor({ t }: { t: Template }) {
                 <MenuItem
                   onClick={async () => {
                     close()
-                    const copy = await addTemplate({ name: `${t.name} (copy)`, description: t.description, layout: t.layout, count_from: t.count_from, groups: t.groups })
+                    const copy = await addTemplate({
+                      name: `${t.name} (copy)`,
+                      description: t.description,
+                      layout: t.layout,
+                      count_from: t.count_from,
+                      big_day: t.big_day,
+                      groups: t.groups,
+                    })
                     if (copy) navigate(`/projects/templates/${copy.id}`)
                   }}
                 >
@@ -307,15 +350,21 @@ function Editor({ t }: { t: Template }) {
                   value={t.count_from}
                   options={[
                     { value: 'start', label: 'the project start date' },
-                    { value: 'launch', label: 'launch or event day' },
+                    { value: 'launch', label: 'a big day' },
                   ]}
                   onChange={(count_from) => save({ count_from })}
                 />
+                {t.count_from === 'launch' && (
+                  <>
+                    <span className="font-normal text-muted">called</span>
+                    <BigDayPicker value={t.big_day || 'Launch day'} onChange={(big_day) => save({ big_day })} />
+                  </>
+                )}
               </span>
               <span className="text-[13px] text-muted">
                 {t.count_from === 'start'
                   ? 'Day 1 is the day the project starts. When you use this template, you pick that date and every task gets a real date.'
-                  : 'Tasks are set a number of days before or after the big day. When you use this template, you pick that day and every task gets a real date.'}
+                  : 'Tasks are set a number of days before or after it. When you use this template, you pick that day and every task gets a real date.'}
               </span>
             </div>
             <div className="flex-1" />
@@ -362,7 +411,7 @@ function Editor({ t }: { t: Template }) {
                     {t.layout === 'phases' && <span className="text-sm font-semibold text-muted">{gi + 1}.</span>}
                     <InlineText label="Name" value={g.name} placeholder="Name it" autoSize onSave={(name) => name && setGroup(g.id, { name })} className="-ml-1 text-sm font-semibold" />
                     {t.layout === 'milestones' ? (
-                      <WhenControl offset={g.offset} countFrom={t.count_from} onChange={(offset) => setGroup(g.id, { offset })} />
+                      <WhenControl offset={g.offset} countFrom={t.count_from} bigDay={t.big_day} onChange={(offset) => setGroup(g.id, { offset })} />
                     ) : (
                       <span className="text-xs text-muted">{t.count_from === 'start' ? weekRange(g.items) : ''}</span>
                     )}
@@ -390,7 +439,15 @@ function Editor({ t }: { t: Template }) {
                 )}
                 {open && (
                   <div className={isList ? '' : 'border-t border-divider'}>
-                    <PlanRows key={`${g.id}-${t.count_from}`} items={g.items} countFrom={t.count_from} inOrder={g.in_order} onChange={(items) => setGroup(g.id, { items })} addLabel={isList ? 'Add task' : `Add task to ${g.name || 'this group'}`} />
+                    <PlanRows
+                      key={`${g.id}-${t.count_from}`}
+                      items={g.items}
+                      countFrom={t.count_from}
+                      bigDay={t.big_day}
+                      inOrder={g.in_order}
+                      onChange={(items) => setGroup(g.id, { items })}
+                      addLabel={isList ? 'Add task' : `Add task to ${g.name || 'this group'}`}
+                    />
                   </div>
                 )}
               </Card>
@@ -423,7 +480,7 @@ function Editor({ t }: { t: Template }) {
               <span>Asked each time</span>
             </div>
             <div className="flex justify-between text-[13px]">
-              <span className="text-muted">{t.count_from === 'start' ? 'Start date' : 'Launch or event day'}</span>
+              <span className="text-muted">{t.count_from === 'start' ? 'Start date' : t.big_day || 'Launch day'}</span>
               <span>Asked each time</span>
             </div>
           </div>

@@ -135,9 +135,11 @@ export function Popover({
   children,
   align = 'start',
   side = 'bottom',
+  className = 'inline-block',
 }: {
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode
   children: (close: () => void) => ReactNode
+  className?: string
   align?: 'start' | 'end'
   // 'right' opens beside the trigger, lined up with its bottom (used by the sidebar avatar).
   side?: 'bottom' | 'right' | 'top'
@@ -148,7 +150,7 @@ export function Popover({
   useDismiss(open, close, ref)
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={ref} className={cx('relative', className)}>
       {trigger({ open, toggle: () => setOpen((o) => !o) })}
       {open && (
         <div
@@ -274,6 +276,7 @@ export function Modal({
   children,
   footer,
   wide,
+  large,
   headerActions,
 }: {
   open: boolean
@@ -282,6 +285,8 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
+  // The roomiest pop-up, for pickers with a list on the left and a preview on the right.
+  large?: boolean
   headerActions?: ReactNode
 }) {
   useEffect(() => {
@@ -299,7 +304,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         onMouseDown={(e) => e.stopPropagation()}
-        className={cx('flex max-h-[88vh] w-full flex-col rounded-2xl bg-surface shadow-popup', wide ? 'max-w-[680px]' : 'max-w-lg')}
+        className={cx('flex max-h-[88vh] w-full flex-col rounded-2xl bg-surface shadow-popup', large ? 'max-w-[960px]' : wide ? 'max-w-[680px]' : 'max-w-lg')}
       >
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-base font-semibold">{title}</h2>

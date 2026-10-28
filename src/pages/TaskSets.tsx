@@ -60,7 +60,7 @@ export default function TaskSets() {
             ))}
             {list.length === 0 && taskSets.length > 0 && <span className="px-2.5 py-2 text-xs text-muted">No sets match.</span>}
             {list.length === 0 && taskSets.length === 0 && <span className="px-2.5 py-2 text-xs leading-relaxed text-muted">None of your own yet. Start from a starter below, or tick a few tasks in your list and choose Save as task set.</span>}
-            {starterList.length > 0 && <span className="px-2.5 pt-3 pb-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Starters</span>}
+            {starterList.length > 0 && <span className="px-2.5 pt-3 pb-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">From Odessi</span>}
             {starterList.map((st) => (
               <button key={st.key} type="button" onClick={() => pick(`starter-${st.key}`)} className={`flex flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left ${shownStarter?.key === st.key ? 'bg-canvas' : 'hover:bg-divider'}`}>
                 <span className="text-[13px] font-medium">{st.name}</span>
@@ -180,7 +180,7 @@ function StarterPanel({ starter }: { starter: SetStarter }) {
     <div className="flex min-w-0 flex-col gap-4">
       <Card className="flex flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
-          <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-medium text-muted">Starter</span>
+          <span className="rounded-full bg-canvas px-2.5 py-0.5 text-xs font-medium text-muted">From Odessi</span>
           <h2 className="min-w-0 flex-1 text-lg font-semibold">{starter.name}</h2>
           <Button size="sm" onClick={customize}>
             Customize
