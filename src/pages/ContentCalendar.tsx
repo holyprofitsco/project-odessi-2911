@@ -403,6 +403,34 @@ function CalItem({ c, big, compact }: { c: Content; big?: boolean; compact?: boo
   const posted = isPosted(c)
   const late = c.publish_date && !posted ? diffDays(today, c.publish_date) : 0
   const open = () => navigate(`/content/${c.id}`)
+  if (compact)
+    return (
+      <>
+        <div
+          draggable
+          role="button"
+          tabIndex={0}
+          onDragStart={(e) => {
+            e.stopPropagation()
+            e.dataTransfer.setData('text/plain', c.id)
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            open()
+          }}
+          onContextMenu={(e) => setMenu(pointFrom(e))}
+          onKeyDown={(e) => e.key === 'Enter' && open()}
+          title={`${c.title} · ${platformLine(platformsOf(c))}`}
+          className={`flex h-[22px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] hover:shadow-[0_2px_8px_rgba(20,20,30,0.12)] ${posted ? 'opacity-60' : ''}`}
+          style={{ background: status?.color_bg ?? '#F0F0EE', color: status?.color_text ?? '#666666' }}
+        >
+          <span className="shrink-0 text-[9px] font-bold tracking-[0.04em]">{posted ? '✓' : platformsOf(c).map(shortName).join(' ') || '•'}</span>
+          <span className="min-w-0 truncate font-medium text-ink">{c.title || 'Untitled'}</span>
+          {c.publish_time && <span className="shrink-0 opacity-80">{formatTime(c.publish_time).replace(':00', '').replace(' ', '').toLowerCase()}</span>}
+        </div>
+        {menu && <ContentMenu c={c} at={menu} onClose={() => setMenu(null)} onOpen={open} />}
+      </>
+    )
   return (
     <>
       <div
@@ -436,7 +464,10 @@ function CalItem({ c, big, compact }: { c: Content; big?: boolean; compact?: boo
   )
 }
 
-function Spot({ s, onSpot }: { s: OpenSpot; onSpot: (s: OpenSpot) => void }) {
+const shorts: Record<string, string> = { youtube: 'YT', instagram: 'IG', linkedin: 'LI', substack: 'SS', tiktok: 'TT', facebook: 'FB', pinterest: 'PIN', threads: 'TH' }
+const shortName = (p: Platform) => shorts[p.name.toLowerCase()] ?? p.name.slice(0, 2).toUpperCase()
+
+function Spot({ s, onSpot, compact }: { s: OpenSpot; onSpot: (s: OpenSpot) => void; compact?: boolean }) {
   return (
     <button
       type="button"
@@ -445,9 +476,9 @@ function Spot({ s, onSpot }: { s: OpenSpot; onSpot: (s: OpenSpot) => void }) {
         e.stopPropagation()
         onSpot(s)
       }}
-      className="w-full shrink-0 truncate rounded-lg border-[1.5px] border-dashed border-field px-2 py-1 text-left whitespace-nowrap text-[11px] font-medium text-muted hover:border-accent hover:bg-hover hover:text-accent"
+      className={`w-full shrink-0 truncate text-left whitespace-nowrap text-[11px] font-medium text-muted hover:border-accent hover:bg-hover hover:text-accent ${compact ? 'h-[22px] rounded-md border border-dashed border-field px-1.5' : 'rounded-lg border-[1.5px] border-dashed border-field px-2 py-1'}`}
     >
-      + {s.platform.name}
+      + {compact ? shortName(s.platform) : s.platform.name}
       {s.time && <span className="font-normal opacity-80"> · {formatTime(s.time).replace(':00', '')}</span>}
     </button>
   )
@@ -517,9 +548,9 @@ function DayCell({ date, today, faded, onDrop, children, className = '' }: { dat
 const HEAD_PX = 34
 const WEEKS_SHOWN = 5
 const BAND_PX = 24
-const ITEM_PX = 46
-const SPOT_PX = 32
-const MORE_PX = 20
+const ITEM_PX = 26
+const SPOT_PX = 26
+const MORE_PX = 16
 
 function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, month, scroller, onScroll, onMore, jump }: GridProps & { month: string; scroller: RefObject<HTMLDivElement>; onScroll: () => void; onMore: (date: string) => void; jump: (date: string, smooth?: boolean) => void }) {
   const weeks = Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7))
@@ -562,7 +593,7 @@ function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, mon
               {week.map((d) => {
                 const items = shown.filter((c) => c.publish_date === d).sort((a, b) => (a.publish_time ?? '').localeCompare(b.publish_time ?? ''))
                 const open = spots.filter((s) => s.date === d)
-                const all = [...items.map((c) => ({ h: ITEM_PX, el: <CalItem key={c.id} c={c} compact /> })), ...open.map((s) => ({ h: SPOT_PX, el: <Spot key={s.key} s={s} onSpot={onSpot} /> }))]
+                const all = [...items.map((c) => ({ h: ITEM_PX, el: <CalItem key={c.id} c={c} compact /> })), ...open.map((s) => ({ h: SPOT_PX, el: <Spot key={s.key} s={s} onSpot={onSpot} compact /> }))]
                 // Show what fits. If not everything does, leave room for "+N more".
                 let used = 0
                 let fit = all.length
@@ -575,7 +606,7 @@ function MonthGrid({ days, shown, spots, today, onSpot, schedule, campaigns, mon
                     {bands > 0 && <span className="shrink-0" style={{ height: bands * BAND_PX }} />}
                     {all.slice(0, fit).map((x) => x.el)}
                     {fit < all.length && (
-                      <button type="button" onClick={() => onMore(d)} className="self-start rounded-md px-1.5 text-[11px] font-semibold text-muted hover:bg-hover hover:text-accent">
+                      <button type="button" onClick={() => onMore(d)} className="self-start rounded-md px-1.5 text-[11px] leading-4 font-semibold text-muted hover:bg-hover hover:text-accent">
                         {all.length - fit} more
                       </button>
                     )}
