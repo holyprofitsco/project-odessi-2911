@@ -354,9 +354,14 @@ function Include({ checked, onChange, label }: { checked: boolean; onChange: () 
 function WeekendLine({ count, value, onChange }: { count: number; value: WeekendChoice; onChange: (v: WeekendChoice) => void }) {
   if (!count) return null
   return (
-    <div className="flex items-center gap-2 text-[13px] text-muted">
-      <span>
-        {count} {count === 1 ? 'task lands' : 'tasks land'} on a weekend.
+    // A soft warm note: easy to spot, but not an alarm.
+    <div className="flex w-fit items-center gap-2 rounded-xl bg-[#FBF1E8] py-1 pr-1 pl-3 text-[13px] text-waiting">
+      <svg aria-hidden="true" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M3 10h18M8 3v4M16 3v4" />
+      </svg>
+      <span className="font-medium">
+        {count} {count === 1 ? 'task lands' : 'tasks land'} on a weekend
       </span>
       <Dropdown
         label="Weekend tasks"

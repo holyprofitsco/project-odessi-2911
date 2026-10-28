@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { InlineText } from '../components/clientParts'
-import { BigDayPicker, PlanRows, WhenControl } from '../components/PlanEditor'
+import { BigDayPicker, bigDayNames, PlanRows, WhenControl } from '../components/PlanEditor'
 import { OrderPicker, TemplateUseModal, useTemplateSources } from '../components/projectParts'
 import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover } from '../components/ui'
 import { shortDate } from '../lib/dates'
@@ -53,15 +53,7 @@ export default function Templates() {
     })
     if (t) navigate(`/projects/templates/${t.id}?new=1`)
   }
-  const blank = async () => {
-    const layout = 'phases'
-    const t = await addTemplate({
-      name: 'New template',
-      layout,
-      groups: [{ id: newId(), name: 'Phase 1', offset: 0, in_order: false, items: [] }],
-    })
-    if (t) navigate(`/projects/templates/${t.id}?new=1`)
-  }
+  const [creating, setCreating] = useState(false)
 
   const grid = 'grid grid-cols-[minmax(0,1fr)_120px_190px_140px_220px] items-center gap-x-8'
   const used = (t: { used_count: number; last_used?: string | null }) => (t.used_count ? `${t.used_count === 1 ? 'Once' : `${t.used_count} times`}${t.last_used ? ` · ${shortDate(t.last_used, today)}` : ''}` : '–')
@@ -75,7 +67,7 @@ export default function Templates() {
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-semibold tracking-tight">Project templates</h1>
           <div className="flex-1" />
-          <Button variant="primary" onClick={blank}>
+          <Button variant="primary" onClick={() => setCreating(true)}>
             + New template
           </Button>
         </div>
@@ -184,6 +176,7 @@ export default function Templates() {
       <p className="px-1 text-[13px] text-muted">Tip: any project can become a template. Open it, then choose … › Save as template.</p>
 
       <TemplateUseModal open={!!using} initialId={using ?? undefined} onClose={() => setUsing(null)} />
+      {creating && <NewTemplateModal onClose={() => setCreating(false)} />}
       <Modal
         open={!!deleting}
         onClose={() => setDeleting(null)}
@@ -520,5 +513,121 @@ function Editor({ t }: { t: Template }) {
         <p className="text-sm text-muted">The template goes away. This can’t be undone.</p>
       </Modal>
     </div>
+  )
+}
+
+/* "+ New template": a short setup first, so the choices that shape everything (layout, what dates count from) aren't missed. */
+
+function NewTemplateModal({ onClose }: { onClose: () => void }) {
+  const { addTemplate } = useProjects()
+  const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [layout, setLayout] = useState<Layout>('phases')
+  const [countFrom, setCountFrom] = useState<'start' | 'launch'>('start')
+  const [bigDay, setBigDay] = useState('Launch day')
+  const [ownWords, setOwnWords] = useState('')
+  const [busy, setBusy] = useState(false)
+  const dayName = ownWords.trim() || bigDay
+
+  const create = async () => {
+    setBusy(true)
+    const first = layout === 'phases' ? 'Phase 1' : layout === 'milestones' ? 'Milestone 1' : ''
+    const t = await addTemplate({ name: name.trim(), layout, count_from: countFrom, big_day: dayName, groups: [{ id: newId(), name: first, offset: 0, in_order: false, items: [] }] })
+    setBusy(false)
+    if (!t) return
+    onClose()
+    navigate(`/projects/templates/${t.id}`)
+  }
+
+  const choice = (on: boolean) => `flex flex-1 flex-col gap-0.5 rounded-xl border-[1.5px] px-3.5 py-2.5 text-left ${on ? 'border-accent bg-accent-tint' : 'border-field hover:border-[#C4C4CA]'}`
+  const label = 'text-[13px] font-semibold'
+  const chip = (on: boolean) => `h-8 rounded-full border-[1.5px] px-3 text-[13px] font-medium ${on ? 'border-accent bg-accent-tint' : 'border-field hover:border-[#C4C4CA]'}`
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="New template"
+      footer={
+        <>
+          <span />
+          <div className="flex gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" disabled={busy || !name.trim()} onClick={create}>
+              Create template
+            </Button>
+          </div>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-5">
+        <label className="flex flex-col gap-1.5">
+          <span className={label}>Name</span>
+          <input
+            autoFocus
+            value={name}
+            placeholder="Like Brand photoshoot, or Workshop"
+            onChange={(e) => setName(e.target.value)}
+            className="h-10 rounded-xl border-[1.5px] border-field px-3 text-sm placeholder:text-faint focus:border-ink focus:outline-none"
+          />
+        </label>
+
+        <div className="flex flex-col gap-1.5">
+          <span className={label}>Layout</span>
+          <div className="flex gap-2">
+            {(Object.keys(layoutInfo) as Layout[]).map((l) => (
+              <button key={l} type="button" onClick={() => setLayout(l)} className={choice(layout === l)}>
+                <span className="text-[13px] font-medium">{layoutInfo[l].label}</span>
+                <span className="text-xs text-muted">{layoutInfo[l].hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className={label}>Dates count from</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setCountFrom('start')} className={choice(countFrom === 'start')}>
+              <span className="text-[13px] font-medium">The start date</span>
+              <span className="text-xs text-muted">Day 1 is when the project starts. Good for client work and courses.</span>
+            </button>
+            <button type="button" onClick={() => setCountFrom('launch')} className={choice(countFrom === 'launch')}>
+              <span className="text-[13px] font-medium">A big day</span>
+              <span className="text-xs text-muted">Tasks count back from it, like a launch or an event.</span>
+            </button>
+          </div>
+          <span className="text-xs text-faint">When you use the template, you pick that date and every task gets a real date.</span>
+        </div>
+
+        {countFrom === 'launch' && (
+          <div className="flex flex-col gap-1.5">
+            <span className={label}>What’s the big day called?</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {bigDayNames.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  aria-pressed={!ownWords.trim() && bigDay === n}
+                  onClick={() => {
+                    setBigDay(n)
+                    setOwnWords('')
+                  }}
+                  className={chip(!ownWords.trim() && bigDay === n)}
+                >
+                  {n}
+                </button>
+              ))}
+              <input
+                aria-label="Your own words"
+                value={ownWords}
+                placeholder="Or your own words"
+                onChange={(e) => setOwnWords(e.target.value)}
+                className={`h-8 w-44 rounded-full border-[1.5px] px-3 text-[13px] placeholder:text-faint focus:outline-none ${ownWords.trim() ? 'border-accent bg-accent-tint' : 'border-field focus:border-ink'}`}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }

@@ -633,7 +633,7 @@ function ContactSection({ client }: { client: Client }) {
         </InfoRow>
       )}
       <InfoRow label="Phone">
-        <InlineText label="Phone" value={client.phone} placeholder="Add a phone" onSave={(phone) => updateClient(client.id, { phone: formatPhone(phone) })} className="flex-1" />
+        <InlineText label="Phone" value={formatPhone(client.phone)} placeholder="Add a phone" onSave={(phone) => updateClient(client.id, { phone: formatPhone(phone) })} className="flex-1" />
         <CopyButton text={client.phone} />
       </InfoRow>
       <InfoRow label="Website">

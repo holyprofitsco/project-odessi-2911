@@ -200,7 +200,7 @@ export default function PersonModal({ personId, onClose, onOpenTask }: { personI
             </div>
             <div className={row}>
               <span className="w-28 shrink-0 text-muted">Phone</span>
-              <InlineText label="Phone" value={person.phone} placeholder="Add a phone" onSave={(phone) => updatePerson(person.id, { phone: formatPhone(phone) })} className="flex-1" />
+              <InlineText label="Phone" value={formatPhone(person.phone)} placeholder="Add a phone" onSave={(phone) => updatePerson(person.id, { phone: formatPhone(phone) })} className="flex-1" />
               <CopyButton text={person.phone} />
             </div>
             <div className={row}>
