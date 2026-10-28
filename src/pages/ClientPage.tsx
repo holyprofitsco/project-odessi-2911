@@ -409,12 +409,21 @@ function TaskLinker({ exclude, onPick }: { exclude: string[]; onPick: (id: strin
   )
 }
 
-/* Notes and activity: one box to add a note or log a call, email, or session. History below, newest first. */
+/* Notes and activity: "+ Log activity" opens a small form at the top. History below, newest first. */
+
+const kindPrompt: Record<string, string> = {
+  note: 'What do you want to remember?',
+  call: 'What did you talk about?',
+  email: 'What was the email about?',
+  session: 'How did the session go?',
+}
 
 function NotesSection({ client, onOpenTask }: { client: Client; onOpenTask: (id: string) => void }) {
   const { notes, addNote, today } = useClients()
   const { workspace } = useWorkspace()
   const { peopleOf } = useClientInfo()
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLTextAreaElement>(null)
   const [body, setBody] = useState('')
   const [kind, setKind] = useState<NoteKind>('note')
   const [withId, setWithId] = useState<string>('')
@@ -422,51 +431,94 @@ function NotesSection({ client, onOpenTask }: { client: Client; onOpenTask: (id:
   const crew = peopleOf(client.id)
   const mine = notes.filter((n) => n.client_id === client.id).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at) || b.created_at.localeCompare(a.created_at))
 
+  const reset = () => {
+    setBody('')
+    setKind('note')
+    setWithId('')
+    setDate(null)
+    setOpen(false)
+  }
   const save = async () => {
     if (!body.trim()) return
     const text = body.trim()
-    setBody('')
+    reset()
     await addNote({ client_id: client.id, kind, body: text, person_id: withId || null, occurred_at: date ?? today })
-    setKind('note')
-    setDate(null)
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <span className={`${sectionTitle} px-1`}>Notes and activity</span>
-      <Card>
-        <div className="flex items-start gap-2 px-[18px] py-3">
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Dropdown label="Kind" value={kind} options={noteKinds} onChange={setKind} />
-            {crew.length > 0 && <Dropdown label="With" value={withId} options={[{ value: '', label: 'With: nobody' }, ...crew.map((p) => ({ value: p.id, label: `With: ${firstName(p.name) || 'Unnamed'}` }))]} onChange={setWithId} />}
-            <DatePicker label="When" value={date ?? today} today={today} weekStart={workspace?.week_start} clearable={false} onChange={(d) => setDate(d)} />
+      <div className="flex items-center px-1">
+        <span className={sectionTitle}>Notes and activity</span>
+        <div className="flex-1" />
+        {!open && (
+          <Button size="sm" onClick={() => setOpen(true)}>
+            + Log activity
+          </Button>
+        )}
+      </div>
+
+      {open && (
+        <Card className="flex flex-col gap-3 p-4">
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Kind">
+            {noteKinds.map((k) => (
+              <button
+                key={k.value}
+                type="button"
+                role="radio"
+                aria-checked={kind === k.value}
+                onClick={() => {
+                  setKind(k.value)
+                  box.current?.focus()
+                }}
+                className={`h-8 rounded-full px-3.5 text-[13px] font-medium ${kind === k.value ? 'bg-ink text-white' : 'border-[1.5px] border-field bg-surface text-ink hover:border-[#C4C4CA]'}`}
+              >
+                {k.label}
+              </button>
+            ))}
           </div>
           <textarea
-            aria-label="Add a note"
-            rows={body ? 3 : 1}
-            placeholder="Add a note, or log a call or email…"
+            ref={box}
+            autoFocus
+            aria-label="What happened"
+            rows={3}
+            placeholder={kindPrompt[kind] ?? 'What happened?'}
             value={body}
             onChange={(e) => setBody(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                save()
-              }
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save()
+              if (e.key === 'Escape') reset()
             }}
-            className="min-h-9 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none"
+            className="w-full resize-y rounded-xl border-[1.5px] border-field p-3 text-sm leading-relaxed placeholder:text-faint focus:border-ink focus:outline-none"
           />
-          {body.trim() && (
-            <Button size="sm" variant="primary" onClick={save}>
-              Add
+          <div className="flex items-center gap-2">
+            {crew.length > 0 && <Dropdown label="With" value={withId} options={[{ value: '', label: 'With: nobody' }, ...crew.map((p) => ({ value: p.id, label: `With: ${firstName(p.name) || 'Unnamed'}` }))]} onChange={setWithId} />}
+            <DatePicker label="When" value={date ?? today} today={today} weekStart={workspace?.week_start} clearable={false} onChange={(d) => setDate(d)} />
+            <div className="flex-1" />
+            <Button size="sm" variant="quiet" onClick={reset}>
+              Cancel
             </Button>
-          )}
-        </div>
-        {mine.map((n) => (
-          <div key={n.id} className="border-t border-divider">
-            <NoteRow note={n} onOpenTask={onOpenTask} />
+            <Button size="sm" variant="primary" disabled={!body.trim()} onClick={save}>
+              Save
+            </Button>
           </div>
-        ))}
-      </Card>
+        </Card>
+      )}
+
+      {mine.length > 0 ? (
+        <Card>
+          {mine.map((n) => (
+            <div key={n.id} className="border-divider [&+&]:border-t">
+              <NoteRow note={n} onOpenTask={onOpenTask} />
+            </div>
+          ))}
+        </Card>
+      ) : (
+        !open && (
+          <Card className="px-[18px] py-5 text-[13px] text-muted">
+            Nothing logged yet. Log calls, emails and notes here so you always know where things stand with {client.name || 'this client'}.
+          </Card>
+        )
+      )}
     </div>
   )
 }
