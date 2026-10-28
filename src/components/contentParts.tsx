@@ -1,3 +1,4 @@
+import { siBluesky, siFacebook, siInstagram, siPinterest, siSubstack, siThreads, siTiktok, siX, siYoutube } from 'simple-icons'
 import { useRef, useState, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { CAPTION_MAX, firstTime, newAttachmentId, useContent, type Attachment, type Content, type Platform } from '../lib/content'
@@ -726,5 +727,26 @@ export function ScheduleModal({ c, onClose, onDone }: { c: Content; onClose: () 
         {platform && platform.times.length > 0 && <span className="text-xs text-faint">Your usual {platform.name} {platform.times.length === 1 ? 'time is' : 'times are'} {platform.times.map(formatTime).join(' and ')}.</span>}
       </div>
     </Modal>
+  )
+}
+
+/* Small platform mark from the free Simple Icons set. LinkedIn isn't in that set, so it gets a plain "in" tile. Anything else shows its first letter. */
+const platformIcons: Record<string, { path: string }> = { youtube: siYoutube, instagram: siInstagram, tiktok: siTiktok, facebook: siFacebook, substack: siSubstack, pinterest: siPinterest, threads: siThreads, x: siX, twitter: siX, bluesky: siBluesky }
+
+export function PlatformIcon({ p, size = 11 }: { p: Platform; size?: number }) {
+  const key = p.name.trim().toLowerCase()
+  const icon = platformIcons[key]
+  if (icon)
+    return (
+      <svg role="img" aria-label={p.name} viewBox="0 0 24 24" width={size} height={size} className="shrink-0" fill="currentColor">
+        <path d={icon.path} />
+      </svg>
+    )
+  return (
+    <span aria-label={p.name} className="flex shrink-0 items-center justify-center rounded-[3px] bg-current" style={{ width: size, height: size }}>
+      <span className="font-bold text-white mix-blend-screen" style={{ fontSize: size * 0.62, lineHeight: 1 }}>
+        {key === 'linkedin' ? 'in' : p.name.trim()[0]?.toUpperCase()}
+      </span>
+    </span>
   )
 }

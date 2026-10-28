@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ContentMenu, PlatformChips, platformLine, pointFrom, Tick, type MenuPoint } from '../components/contentParts'
+import { ContentMenu, PlatformChips, PlatformIcon, platformLine, pointFrom, Tick, type MenuPoint } from '../components/contentParts'
 import { Button, MenuItem, Popover, Switch } from '../components/ui'
 import { useContent, type Campaign, type Content, type OpenSpot, type Platform } from '../lib/content'
 import { addDays, diffDays, formatTime, monthNames, weekdayNames, weekdayOf } from '../lib/dates'
@@ -424,7 +424,10 @@ function CalItem({ c, big, compact }: { c: Content; big?: boolean; compact?: boo
           className={`flex h-[22px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] hover:shadow-[0_2px_8px_rgba(20,20,30,0.12)] ${posted ? 'opacity-60' : ''}`}
           style={{ background: status?.color_bg ?? '#F0F0EE', color: status?.color_text ?? '#666666' }}
         >
-          <span className="shrink-0 text-[9px] font-bold tracking-[0.04em]">{posted ? '✓' : platformsOf(c).map(shortName).join(' ') || '•'}</span>
+          <span className="flex shrink-0 items-center gap-0.5">{posted && <span className="text-[10px]">✓</span>}
+            {platformsOf(c).map((p) => (
+              <PlatformIcon key={p.id} p={p} />
+            ))}</span>
           <span className="min-w-0 truncate font-medium text-ink">{c.title || 'Untitled'}</span>
           {c.publish_time && <span className="shrink-0 opacity-80">{formatTime(c.publish_time).replace(':00', '').replace(' ', '').toLowerCase()}</span>}
         </div>
@@ -464,9 +467,6 @@ function CalItem({ c, big, compact }: { c: Content; big?: boolean; compact?: boo
   )
 }
 
-const shorts: Record<string, string> = { youtube: 'YT', instagram: 'IG', linkedin: 'LI', substack: 'SS', tiktok: 'TT', facebook: 'FB', pinterest: 'PIN', threads: 'TH' }
-const shortName = (p: Platform) => shorts[p.name.toLowerCase()] ?? p.name.slice(0, 2).toUpperCase()
-
 function Spot({ s, onSpot, compact }: { s: OpenSpot; onSpot: (s: OpenSpot) => void; compact?: boolean }) {
   return (
     <button
@@ -478,7 +478,7 @@ function Spot({ s, onSpot, compact }: { s: OpenSpot; onSpot: (s: OpenSpot) => vo
       }}
       className={`w-full shrink-0 truncate text-left whitespace-nowrap text-[11px] font-medium text-muted hover:border-accent hover:bg-hover hover:text-accent ${compact ? 'h-[22px] rounded-md border border-dashed border-field px-1.5' : 'rounded-lg border-[1.5px] border-dashed border-field px-2 py-1'}`}
     >
-      + {compact ? shortName(s.platform) : s.platform.name}
+      {compact ? <span className="inline-flex items-center gap-1 align-[-1px]">+ <PlatformIcon p={s.platform} /></span> : `+ ${s.platform.name}`}
       {s.time && <span className="font-normal opacity-80"> · {formatTime(s.time).replace(':00', '')}</span>}
     </button>
   )
