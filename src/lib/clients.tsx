@@ -137,16 +137,16 @@ type ClientsState = StageApi & {
   connect: (from: { type: ItemType; id: string }, to: { type: ItemType; id: string }) => Promise<void>
   disconnect: (id: string) => Promise<void>
   addLink: (itemType: ItemType, itemId: string, url: string, name: string) => Promise<void>
-  uploadPhoto: (file: File) => Promise<string | null>
+  // size: the longest side to save. Faces and logos are small; covers and saved images are bigger.
+  uploadPhoto: (file: File, size?: number) => Promise<string | null>
   removeFile: (id: string) => Promise<void>
 }
 
 // Big pictures shrunk in one jump look jagged, so halve them step by step down to 320px before saving.
-async function shrinkImage(file: File): Promise<Blob> {
+async function shrinkImage(file: File, target = 320): Promise<Blob> {
   if (file.type === 'image/gif') return file
   try {
     const bitmap = await createImageBitmap(file)
-    const target = 320
     let w = bitmap.width
     let h = bitmap.height
     let source: CanvasImageSource = bitmap
@@ -467,13 +467,13 @@ export function ClientsProvider({ children }: { children: ReactNode }) {
 
   // Saves a photo or logo to the workspace's folder and hands back its web address.
   const uploadPhoto = useCallback(
-    async (file: File) => {
+    async (file: File, size = 320) => {
       if (!workspaceId) return null
       if (file.size > 5 * 1024 * 1024) {
         toast('That picture is over 5 MB. Try a smaller one.')
         return null
       }
-      const small = await shrinkImage(file)
+      const small = await shrinkImage(file, size)
       const ext = small.type === 'image/jpeg' ? 'jpg' : 'png'
       const path = `${workspaceId}/${newOptionId()}.${ext}`
       const { error } = await supabase.storage.from('photos').upload(path, small, { contentType: small.type })

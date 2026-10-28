@@ -4,6 +4,10 @@ import { ToastProvider } from './components/ui'
 import { areas } from './lib/areas'
 import { AuthProvider, useAuth } from './lib/auth'
 import { ClientsProvider } from './lib/clients'
+import { ContentProvider } from './lib/content'
+import Content from './pages/Content'
+import ContentPage from './pages/ContentPage'
+import ContentSettings from './pages/settings/ContentSettings'
 import { ProjectsProvider } from './lib/projects'
 import Projects from './pages/Projects'
 import ProjectPage from './pages/ProjectPage'
@@ -27,7 +31,6 @@ import SettingsLayout, { SettingsLater } from './pages/settings/SettingsLayout'
 
 const laterSettings: [string, string][] = [
   ['nudges', 'Nudges and notifications'],
-  ['content', 'Content'],
   ['connections', 'Connections'],
   ['team', 'Team'],
   ['billing', 'Billing'],
@@ -43,6 +46,7 @@ function Gate() {
         <TasksProvider>
         <ClientsProvider>
         <ProjectsProvider>
+        <ContentProvider>
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<Home />} />
@@ -55,7 +59,11 @@ function Gate() {
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/board" element={<Clients />} />
             <Route path="/clients/:id" element={<ClientPage />} />
-            {areas.filter((a) => a.key !== 'tasks' && a.key !== 'clients' && a.key !== 'projects').map((a) => (
+            <Route path="/content" element={<Content />} />
+            <Route path="/content/calendar" element={<Content />} />
+            <Route path="/content/ideas" element={<Content />} />
+            <Route path="/content/:id" element={<ContentPage />} />
+            {areas.filter((a) => a.key !== 'tasks' && a.key !== 'clients' && a.key !== 'projects' && a.key !== 'content').map((a) => (
               <Route key={a.key} path={`${a.path}/*`} element={<Placeholder title={a.label} stage={a.stage} />} />
             ))}
             <Route path="/automations" element={<Placeholder title="Automations" stage={7} />} />
@@ -68,6 +76,7 @@ function Gate() {
               <Route path="tasks" element={<TasksSettings />} />
               <Route path="clients" element={<ClientsSettings />} />
               <Route path="projects" element={<ProjectsSettings />} />
+              <Route path="content" element={<ContentSettings />} />
               {laterSettings.map(([slug, title]) => (
                 <Route key={slug} path={slug} element={<SettingsLater title={title} />} />
               ))}
@@ -75,6 +84,7 @@ function Gate() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
+        </ContentProvider>
         </ProjectsProvider>
         </ClientsProvider>
         </TasksProvider>

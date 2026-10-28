@@ -36,6 +36,7 @@ export type Task = {
   waiting_on_person_id: string | null
   waiting_on_task_id: string | null
   project_id: string | null
+  content_id: string | null
   phase_id: string | null
   milestone_id: string | null
   waiting_since: string | null
@@ -111,7 +112,7 @@ type TasksState = {
 
 const TasksContext = createContext<TasksState | null>(null)
 
-const NEXT_FIELDS = ['title', 'priority', 'due_time', 'notes', 'repeat_rule', 'repeat_from', 'project_id', 'phase_id', 'milestone_id'] as const
+const NEXT_FIELDS = ['title', 'priority', 'due_time', 'notes', 'repeat_rule', 'repeat_from', 'project_id', 'phase_id', 'milestone_id', 'content_id'] as const
 
 export function TasksProvider({ children }: { children: ReactNode }) {
   const { workspace } = useWorkspace()
