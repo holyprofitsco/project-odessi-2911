@@ -181,7 +181,7 @@ export default function Projects() {
             { value: 'status', label: 'Status' },
             { value: 'client', label: 'Client' },
             { value: 'type', label: 'Type' },
-            { value: 'month', label: 'Due month' },
+            { value: 'month', label: 'Month due' },
             { value: 'none', label: 'None' },
           ]}
           onChange={(g) => {
