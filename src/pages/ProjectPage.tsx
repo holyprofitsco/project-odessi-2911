@@ -2,10 +2,10 @@ import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ConnectionChip, ConnectPicker, InlineText, withHttp } from '../components/clientParts'
 import { DatePicker } from '../components/pickers'
-import { AddTaskLine, ClientSelect, ProgressBar, ProjectTaskRow, SaveAsTaskSetModal, TaskSetMenu, TaskSetUseModal } from '../components/projectParts'
+import { AddTaskLine, ClientSelect, OrderPicker, ProgressBar, ProjectColumnHeaders, ProjectTaskRow, SaveAsTaskSetModal, TaskSetMenu, TaskSetUseModal } from '../components/projectParts'
 import TaskModal from '../components/TaskModal'
 import { StatusEditor, StatusPicker } from '../components/taskParts'
-import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover, Switch } from '../components/ui'
+import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover } from '../components/ui'
 import { useClients } from '../lib/clients'
 import { diffDays, monthNames, shortDate } from '../lib/dates'
 import { layoutInfo, useProjects, type Layout, type Milestone, type Phase, type Project, type TaskSet } from '../lib/projects'
@@ -152,6 +152,7 @@ function Page({ project }: { project: Project }) {
             <LayoutMenu value={project.layout} onChange={(layout) => updateProject(project.id, { layout })} />
           </div>
 
+          {own.length > 0 && <ProjectColumnHeaders />}
           {project.layout === 'phases' && <PhasesLayout project={project} phases={phases.filter((p) => p.project_id === project.id)} own={own} hideDone={hideDone} dragId={dragId} setDragId={setDragId} moveTask={moveTask} onOpen={openTask} />}
           {project.layout === 'milestones' && <MilestonesLayout project={project} milestones={milestones.filter((m) => m.project_id === project.id)} own={own} hideDone={hideDone} dragId={dragId} setDragId={setDragId} moveTask={moveTask} onOpen={openTask} />}
           {project.layout === 'list' && (
@@ -265,7 +266,7 @@ function GroupCard({
 }: DragProps & {
   project: Project
   group: Group
-  header?: (props: { open: boolean; toggle: () => void; menu: ReactNode }) => ReactNode
+  header?: (props: { open: boolean; toggle: () => void; menu: ReactNode; order: ReactNode }) => ReactNode
   addLabel: string
   alwaysOpen?: boolean
   defaultOpen?: boolean
@@ -294,16 +295,6 @@ function GroupCard({
     <MoreMenu>
       {(close) => (
         <div className="flex w-64 flex-col">
-          {onInOrder && (
-            <label className="flex cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2 hover:bg-divider">
-              <span className="flex flex-1 flex-col gap-0.5">
-                <span className="text-[13px] font-medium">Do in order</span>
-                <span className="text-xs text-muted">Each task waits for the one above it. Drag to change the order.</span>
-              </span>
-              <Switch label="Do in order" checked={group.inOrder} onChange={onInOrder} />
-            </label>
-          )}
-          <div className="my-0.5 border-t border-divider" />
           <Popover
             side="right"
             trigger={({ toggle }) => (
@@ -351,11 +342,16 @@ function GroupCard({
     </MoreMenu>
   )
 
+  const order = onInOrder ? <OrderPicker inOrder={group.inOrder} onChange={onInOrder} /> : null
+
   return (
     <Card>
       <div onDragOver={(e) => e.preventDefault()} onDrop={() => drag.moveTask(group, null)}>
-        {header ? header({ open: shownOpen, toggle: () => setOpen(!open), menu }) : (
-          <div className="flex items-center justify-end px-2 pt-1">{menu}</div>
+        {header ? header({ open: shownOpen, toggle: () => setOpen(!open), menu, order }) : (
+          <div className="flex items-center justify-end gap-1 px-2 pt-1">
+            {order}
+            {menu}
+          </div>
         )}
         {shownOpen && (
           <div className={header ? 'border-t border-divider' : ''}>
@@ -406,6 +402,8 @@ function PhasesLayout({ project, phases, own, ...drag }: DragProps & { project: 
   const current = doneFlags.findIndex((d) => !d)
   const loose = own.filter((t) => !phases.some((p) => p.id === t.phase_id))
 
+  if (!phases.length && !loose.length) return <EmptyPlan project={project} kind="phases" />
+
   return (
     <div className="flex flex-col gap-3">
       {phases.map((ph, i) => {
@@ -417,13 +415,13 @@ function PhasesLayout({ project, phases, own, ...drag }: DragProps & { project: 
             key={ph.id}
             project={project}
             group={{ key: ph.id, field: 'phase_id', value: ph.id, inOrder: ph.in_order, tasks: list }}
-            defaultOpen={state === 'current'}
+            defaultOpen={state !== 'done'}
             addLabel={`Add task to ${ph.name || 'this phase'}`}
             onInOrder={(v) => updatePhase(ph.id, { in_order: v })}
             onDelete={() => (list.length ? setDeleting(ph) : deletePhase(ph.id))}
             deleteLabel="Delete phase"
             {...drag}
-            header={({ open, toggle, menu }) => (
+            header={({ open, toggle, menu, order }) => (
               <div className="flex min-h-[54px] items-center gap-2 py-1.5 pr-2 pl-3">
                 <button type="button" aria-label={open ? 'Fold' : 'Open'} aria-expanded={open} onClick={toggle} className="size-7 rounded-md text-muted hover:bg-divider">
                   {open ? '⌄' : '›'}
@@ -435,6 +433,8 @@ function PhasesLayout({ project, phases, own, ...drag }: DragProps & { project: 
                   to
                   <DatePicker quiet label="Phase end" value={ph.end_date} today={today} weekStart={workspace?.week_start} placeholder="End" onChange={(end_date) => updatePhase(ph.id, { end_date })} />
                 </span>
+                <span className="text-faint">·</span>
+                {order}
                 <div className="flex-1" />
                 {state === 'done' ? <span className="text-xs font-medium text-[#2F5B35]">✓ Done</span> : state === 'current' ? <span className="rounded-full bg-accent-tint px-2.5 py-0.5 text-xs font-medium text-accent">Current phase</span> : <span className="text-xs text-faint">Not started</span>}
                 <ProgressBar done={done} total={list.length} />
@@ -497,6 +497,51 @@ function PhasesLayout({ project, phases, own, ...drag }: DragProps & { project: 
   )
 }
 
+/* A brand new project: a friendly start with a few ready-made sets of phases or milestones. */
+
+const quickPicks = {
+  phases: [
+    ['Discovery', 'Design', 'Build', 'Launch'],
+    ['Plan', 'Create', 'Launch'],
+    ['Kickoff', 'Do the work', 'Review', 'Wrap up'],
+  ],
+  milestones: [
+    ['Kickoff', 'Halfway check', 'Launch day'],
+    ['Draft done', 'Final version', 'Goes live'],
+  ],
+}
+
+function EmptyPlan({ project, kind }: { project: Project; kind: 'phases' | 'milestones' }) {
+  const { addGroups, addPhase, addMilestone } = useProjects()
+  const word = kind === 'phases' ? 'phases' : 'milestones'
+  return (
+    <Card className="flex flex-col items-center gap-4 px-8 py-10 text-center">
+      <div className="flex flex-col gap-1.5">
+        <h2 className="text-base font-semibold">How do you want to break this up?</h2>
+        <p className="mx-auto max-w-md text-[13px] leading-relaxed text-muted">
+          {kind === 'phases'
+            ? 'Phases are the big chunks of a project, done one after another. Pick a set to start with. You can rename or add more anytime.'
+            : 'Milestones are the big dates you’re working toward. Pick a set to start with, then give each one a date.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap justify-center gap-2">
+        {quickPicks[kind].map((names) => (
+          <button key={names.join()} type="button" onClick={() => addGroups(project.id, kind, names)} className="rounded-full border-[1.5px] border-field bg-surface px-3.5 py-1.5 text-[13px] hover:border-ink">
+            {names.join(', ')}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => (kind === 'phases' ? addPhase(project.id, 'Phase 1') : addMilestone(project.id, 'New milestone', null))}
+        className="text-[13px] font-medium text-muted hover:text-ink"
+      >
+        or start with one blank {word === 'phases' ? 'phase' : 'milestone'}
+      </button>
+    </Card>
+  )
+}
+
 /* Milestones layout: a timeline strip, then a card per milestone. */
 
 function MilestonesLayout({ project, milestones, own, ...drag }: DragProps & { project: Project; milestones: Milestone[]; own: Task[] }) {
@@ -513,6 +558,8 @@ function MilestonesLayout({ project, milestones, own, ...drag }: DragProps & { p
   const next = hit.findIndex((h) => !h)
   const loose = own.filter((t) => !milestones.some((m) => m.id === t.milestone_id))
 
+  if (!milestones.length && !loose.length) return <EmptyPlan project={project} kind="milestones" />
+
   return (
     <div className="flex flex-col gap-3">
       {milestones.some((m) => m.date) && <Timeline project={project} milestones={milestones} hit={hit} today={today} />}
@@ -526,13 +573,13 @@ function MilestonesLayout({ project, milestones, own, ...drag }: DragProps & { p
             key={m.id}
             project={project}
             group={{ key: m.id, field: 'milestone_id', value: m.id, inOrder: m.in_order, tasks: list }}
-            defaultOpen={state === 'next'}
+            defaultOpen={state !== 'hit'}
             addLabel={`Add task to ${m.name || 'this milestone'}`}
             onInOrder={(v) => updateMilestone(m.id, { in_order: v })}
             onDelete={() => (list.length ? setDeleting(m) : deleteMilestone(m.id))}
             deleteLabel="Delete milestone"
             {...drag}
-            header={({ open, toggle, menu }) => (
+            header={({ open, toggle, menu, order }) => (
               <div className="flex min-h-[54px] items-center gap-2 py-1.5 pr-2 pl-3">
                 <button type="button" aria-label={open ? 'Fold' : 'Open'} aria-expanded={open} onClick={toggle} className="size-7 rounded-md text-muted hover:bg-divider">
                   {open ? '⌄' : '›'}
@@ -542,6 +589,8 @@ function MilestonesLayout({ project, milestones, own, ...drag }: DragProps & { p
                   <DatePicker quiet label="Milestone date" value={m.date} today={today} weekStart={workspace?.week_start} placeholder="Add a date" onChange={(date) => updateMilestone(m.id, { date })} />
                   {away !== null && !hit[i] && away > 0 && <span>· in {away} {away === 1 ? 'day' : 'days'}</span>}
                 </span>
+                <span className="text-faint">·</span>
+                {order}
                 <div className="flex-1" />
                 {state === 'hit' ? <span className="text-xs font-medium text-[#2F5B35]">✓ Hit</span> : state === 'next' ? <span className="rounded-full bg-accent-tint px-2.5 py-0.5 text-xs font-medium text-accent">Next milestone</span> : <span className="text-xs text-faint">Coming up</span>}
                 <ProgressBar done={done} total={list.length} />
@@ -660,7 +709,7 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-h-9 items-center gap-2 text-[13px]">
-      <span className="w-20 shrink-0 text-muted">{label}</span>
+      <span className="w-[104px] shrink-0 text-muted">{label}</span>
       <div className="flex min-w-0 flex-1 items-center">{children}</div>
     </div>
   )
@@ -697,8 +746,8 @@ function DetailsSection({ project }: { project: Project }) {
           </span>
         </InfoRow>
       )}
-      <InfoRow label="Start">
-        <DatePicker quiet label="Start" value={project.start_date} today={today} weekStart={workspace?.week_start} onChange={(start_date) => updateProject(project.id, { start_date })} />
+      <InfoRow label="Project starts">
+        <DatePicker quiet label="Project starts" value={project.start_date} today={today} weekStart={workspace?.week_start} onChange={(start_date) => updateProject(project.id, { start_date })} />
       </InfoRow>
       {project.layout === 'milestones' ? (
         <InfoRow label="Launch day">

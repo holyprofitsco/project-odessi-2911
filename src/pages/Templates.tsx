@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { InlineText } from '../components/clientParts'
 import { PlanRows, WhenControl } from '../components/PlanEditor'
-import { TemplateUseModal, useTemplateSources } from '../components/projectParts'
-import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover, Switch } from '../components/ui'
+import { OrderPicker, TemplateUseModal, useTemplateSources } from '../components/projectParts'
+import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu, Popover } from '../components/ui'
 import { shortDate } from '../lib/dates'
-import { layoutInfo, planCount, useProjects, weekRange, whenLabel, type Layout, type PlanGroup, type Template } from '../lib/projects'
+import { layoutInfo, planCount, useProjects, weekRange, type Layout, type PlanGroup, type Template } from '../lib/projects'
 import { starters } from '../lib/starters'
 import { newId } from '../lib/tasks'
 
@@ -36,15 +36,15 @@ export default function Templates() {
     const s = starters.find((x) => x.key === key)
     if (!s) return
     const t = await addTemplate({ name: s.name, description: s.description, layout: s.layout, count_from: s.count_from, groups: s.groups.map((g) => ({ ...g, id: newId(), items: g.items.map((i) => ({ ...i, id: newId() })) })), starter_key: s.key })
-    if (t) navigate(`/projects/templates/${t.id}`)
+    if (t) navigate(`/projects/templates/${t.id}?new=1`)
   }
   const blank = async () => {
     const layout = 'phases'
     const t = await addTemplate({ name: 'New template', layout, groups: [{ id: newId(), name: 'Phase 1', offset: 0, in_order: false, items: [] }] })
-    if (t) navigate(`/projects/templates/${t.id}`)
+    if (t) navigate(`/projects/templates/${t.id}?new=1`)
   }
 
-  const grid = 'grid grid-cols-[minmax(0,1fr)_110px_170px_120px_220px] items-center gap-4'
+  const grid = 'grid grid-cols-[minmax(0,1fr)_120px_190px_140px_220px] items-center gap-x-8'
   const used = (t: { used_count: number; last_used?: string | null }) => (t.used_count ? `${t.used_count === 1 ? 'Once' : `${t.used_count} times`}${t.last_used ? ` · ${shortDate(t.last_used, today)}` : ''}` : '–')
 
   return (
@@ -216,7 +216,10 @@ export function TemplateEditor() {
 function Editor({ t }: { t: Template }) {
   const { updateTemplate, deleteTemplate, addTemplate } = useProjects()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const isNew = params.get('new') === '1'
   const [using, setUsing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [description, setDescription] = useState(t.description)
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(t.groups.map((g) => g.id)))
   const save = (changes: Partial<Template>) => updateTemplate(t.id, changes)
@@ -258,6 +261,23 @@ function Editor({ t }: { t: Template }) {
           <span className="rounded-full bg-[#F0F0EE] px-2.5 py-0.5 text-xs font-medium text-[#666666]">Template</span>
           <span className="text-xs text-faint">Saved automatically</span>
           <div className="flex-1" />
+          {isNew ? (
+            <Button
+              onClick={async () => {
+                navigate('/projects/templates')
+                await deleteTemplate(t.id)
+              }}
+            >
+              Cancel
+            </Button>
+          ) : (
+            <button type="button" onClick={() => setConfirmDelete(true)} className="h-9 rounded-[10px] px-3 text-sm font-medium text-[#A4574E] hover:bg-[#F8ECEA]">
+              Delete template
+            </button>
+          )}
+          <Button variant="primary" onClick={() => navigate('/projects/templates')}>
+            Done
+          </Button>
           <MoreMenu>
             {(close) => (
               <div className="w-48">
@@ -270,16 +290,6 @@ function Editor({ t }: { t: Template }) {
                 >
                   Duplicate
                 </MenuItem>
-                <MenuItem
-                  danger
-                  onClick={async () => {
-                    close()
-                    navigate('/projects/templates')
-                    await deleteTemplate(t.id)
-                  }}
-                >
-                  Delete template
-                </MenuItem>
               </div>
             )}
           </MoreMenu>
@@ -288,17 +298,26 @@ function Editor({ t }: { t: Template }) {
 
       <div className="grid grid-cols-[minmax(0,1fr)_320px] items-start gap-6">
         <div className="flex min-w-0 flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] text-muted">Dates count from</span>
-            <Dropdown
-              label="Dates count from"
-              value={t.count_from}
-              options={[
-                { value: 'start', label: 'the start date' },
-                { value: 'launch', label: 'launch or event day' },
-              ]}
-              onChange={(count_from) => save({ count_from })}
-            />
+          <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-3 shadow-card">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                Dates count from
+                <Dropdown
+                  label="Dates count from"
+                  value={t.count_from}
+                  options={[
+                    { value: 'start', label: 'the project start date' },
+                    { value: 'launch', label: 'launch or event day' },
+                  ]}
+                  onChange={(count_from) => save({ count_from })}
+                />
+              </span>
+              <span className="text-[13px] text-muted">
+                {t.count_from === 'start'
+                  ? 'Day 1 is the day the project starts. When you use this template, you pick that date and every task gets a real date.'
+                  : 'Tasks are set a number of days before or after the big day. When you use this template, you pick that day and every task gets a real date.'}
+              </span>
+            </div>
             <div className="flex-1" />
             <Popover
               align="end"
@@ -332,9 +351,8 @@ function Editor({ t }: { t: Template }) {
             return (
               <Card key={g.id}>
                 {isList ? (
-                  <div className="flex items-center justify-end gap-3 px-4 pt-2">
-                    <span className="text-[13px] text-muted">Do in order</span>
-                    <Switch label="Do in order" checked={g.in_order} onChange={(in_order) => setGroup(g.id, { in_order })} />
+                  <div className="flex items-center justify-end px-3 pt-2">
+                    <OrderPicker inOrder={g.in_order} onChange={(in_order) => setGroup(g.id, { in_order })} />
                   </div>
                 ) : (
                   <div className="flex min-h-[54px] items-center gap-2 border-divider py-1.5 pr-2 pl-3">
@@ -348,21 +366,12 @@ function Editor({ t }: { t: Template }) {
                     ) : (
                       <span className="text-xs text-muted">{t.count_from === 'start' ? weekRange(g.items) : ''}</span>
                     )}
-                    {g.in_order && <span className="text-xs text-muted">· In order</span>}
+                    <span className="text-faint">·</span>
+                    <OrderPicker inOrder={g.in_order} onChange={(in_order) => setGroup(g.id, { in_order })} />
                     <div className="flex-1" />
-                    <span className="text-xs text-faint">
-                      {g.items.length} {g.items.length === 1 ? 'task' : 'tasks'}
-                    </span>
                     <MoreMenu>
                       {(close) => (
                         <div className="flex w-64 flex-col">
-                          <label className="flex cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2 hover:bg-divider">
-                            <span className="flex flex-1 flex-col gap-0.5">
-                              <span className="text-[13px] font-medium">Do in order</span>
-                              <span className="text-xs text-muted">Each task waits for the one above it. Drag to change the order.</span>
-                            </span>
-                            <Switch label="Do in order" checked={g.in_order} onChange={(in_order) => setGroup(g.id, { in_order })} />
-                          </label>
                           {t.groups.length > 1 && (
                             <MenuItem
                               danger
@@ -395,9 +404,6 @@ function Editor({ t }: { t: Template }) {
         </div>
 
         <Card className="flex flex-col gap-6 p-5">
-          <p className="rounded-xl bg-canvas px-3.5 py-3 text-[13px] leading-relaxed text-muted">
-            This is a template, so dates are written as {t.count_from === 'start' ? 'Day 1, Week 2,' : `${whenLabel(-7, 'launch')}, Launch day,`} and so on. They turn into real dates when you start a project from it.
-          </p>
           <div className="flex flex-col gap-1.5">
             <span className="text-[13px] font-semibold">About</span>
             <textarea
@@ -431,6 +437,31 @@ function Editor({ t }: { t: Template }) {
         </Card>
       </div>
       <TemplateUseModal open={using} initialId={t.id} onClose={() => setUsing(false)} />
+      <Modal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title={`Delete ${t.name || 'this template'}?`}
+        footer={
+          <>
+            <span className="text-xs text-faint">Projects you already made from it stay put</span>
+            <div className="flex gap-2">
+              <Button onClick={() => setConfirmDelete(false)}>Keep it</Button>
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  setConfirmDelete(false)
+                  navigate('/projects/templates')
+                  await deleteTemplate(t.id)
+                }}
+              >
+                Delete
+              </Button>
+            </div>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">The template goes away. This can’t be undone.</p>
+      </Modal>
     </div>
   )
 }

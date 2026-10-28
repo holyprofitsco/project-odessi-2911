@@ -12,26 +12,29 @@ export const starters: Starter[] = [
   {
     key: 'product-launch',
     name: 'Product launch',
-    description: 'Counts back from launch day',
+    description: 'Eight weeks, counted back from launch day',
     layout: 'milestones',
     count_from: 'launch',
     groups: [
-      group('Waitlist opens', [item('Pick the launch offer and price', -42, 'high'), item('Write the waitlist page', -38), item('Set up the waitlist email', -36), item('Share the waitlist', -35)], -35),
-      group('Sales page live', [item('Write the sales page', -24, 'high'), item('Gather testimonials', -22), item('Design the sales page', -18), item('Test checkout', -15, 'high')], -14),
-      group('Cart opens', [item('Record the launch video', -10, 'high'), item('Schedule launch emails', -6), item('Plan launch week posts', -5), item('Go live', 0, 'urgent')], 0),
-      group('Cart closes', [item('Send the last call email', 6), item('Close the cart', 7, 'high'), item('Welcome the new buyers', 8), item('Write down what worked', 10)], 7),
+      group('Offer ready', [item('Pick the launch offer and price', -56, 'high'), item('Name the offer', -54), item('Outline what buyers get', -52), item('Pick the launch dates', -50, 'high')], -49),
+      group('Waitlist opens', [item('Write the waitlist page', -42), item('Make a freebie for the waitlist', -40), item('Set up the waitlist emails', -37), item('Share the waitlist everywhere', -35, 'high')], -35),
+      group('Sales page live', [item('Write the sales page', -26, 'high'), item('Gather testimonials', -24), item('Design the sales page', -20), item('Set up checkout and test it', -16, 'high'), item('Write the launch emails', -15)], -14),
+      group('Cart opens', [item('Record the launch video', -10, 'high'), item('Schedule launch emails', -6), item('Plan launch week posts', -5), item('Email the waitlist first', -1), item('Go live', 0, 'urgent')], 0),
+      group('Cart closes', [item('Send the last call email', 6, 'high'), item('Close the cart', 7, 'high'), item('Welcome the new buyers', 8), item('Write down what worked', 10)], 7),
     ],
   },
   {
-    key: 'client-onboarding',
-    name: 'Client onboarding',
-    description: 'Welcome a new client in their first two weeks',
+    key: 'client-project',
+    name: 'Client project (done for you)',
+    description: 'Six weeks of client work, from onboarding to handoff',
     layout: 'phases',
     count_from: 'start',
     groups: [
-      group('Welcome', [item('Send the welcome email', 0, 'high'), item('Send the contract and invoice', 0, 'high'), item('Send the intake form', 1)], 0, true),
-      group('Set up', [item('Create their shared folder', 2), item('Book the kickoff call', 2, 'high'), item('Review their intake answers', 4), item('Prep the kickoff agenda', 5)], 0),
-      group('Kickoff', [item('Kickoff call', 7, 'high'), item('Send the call recap and next steps', 8), item('Check in after week one', 13)], 0),
+      group('Onboard', [item('Send the welcome email', 0, 'high'), item('Send the contract and invoice', 0, 'high'), item('Send the intake form', 1), item('Book the kickoff call', 2)], 0, true),
+      group('Discovery', [item('Kickoff call', 5, 'high'), item('Review their intake answers and files', 6), item('Write the project brief', 8), item('Get the brief approved', 10, 'high')], 0),
+      group('Build', [item('First draft', 17, 'high'), item('Share progress with the client', 19), item('Finish the full version', 24, 'high')], 0),
+      group('Review', [item('Send it for review', 25), item('Make the changes', 29), item('Get final approval', 31, 'high')], 0, true),
+      group('Wrap up', [item('Hand over the files', 33), item('Send the final invoice', 33, 'high'), item('Ask for a testimonial', 36), item('Check in a month later', 63)], 0),
     ],
   },
   {
@@ -59,5 +62,36 @@ export const starters: Starter[] = [
       group('Set up', [item('Upload to the course platform', 26), item('Write the welcome lesson', 27), item('Test the student experience', 29, 'high')], 0),
       group('Launch', [item('Open enrollment', 32, 'high'), item('Email your list', 32), item('Welcome the first students', 35)], 0),
     ],
+  },
+]
+
+// Ready-made task sets: small runs of tasks you drop into any project or list. "Customize" copies one into your own sets.
+export type SetStarter = { key: string; name: string; description: string; in_order: boolean; items: PlanItem[] }
+
+export const setStarters: SetStarter[] = [
+  {
+    key: 'client-onboarding',
+    name: 'Client onboarding',
+    description: 'Welcome a new client in their first two weeks',
+    in_order: false,
+    items: [
+      item('Send the welcome email', 0, 'high'),
+      item('Send the contract and invoice', 0, 'high'),
+      item('Send the intake form', 1),
+      item('Create their shared folder', 2),
+      item('Book the kickoff call', 2, 'high'),
+      item('Review their intake answers', 4),
+      item('Prep the kickoff agenda', 5),
+      item('Kickoff call', 7, 'high'),
+      item('Send the call recap and next steps', 8),
+      item('Check in after week one', 13),
+    ],
+  },
+  {
+    key: 'client-offboarding',
+    name: 'Client offboarding',
+    description: 'Wrap up kindly and keep the door open',
+    in_order: false,
+    items: [item('Hand over the final files', 0, 'high'), item('Send the final invoice', 0, 'high'), item('Ask for a testimonial', 3), item('Archive their folder', 7), item('Check in a month later', 30)],
   },
 ]

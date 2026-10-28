@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { StageMenu } from '../components/clientParts'
-import { ClientSelect, keyDateLine, MenuWithHint, ProgressBar, SplitButton, TemplateUseModal } from '../components/projectParts'
+import { ClientSelect, keyDateLine, MenuWithHint, ProgressBar, SplitButton, NewProjectModal, TemplateUseModal } from '../components/projectParts'
 import { ClockIcon, StatusPill } from '../components/taskParts'
 import { Card, Dropdown, EmptyState } from '../components/ui'
 import { useClients } from '../lib/clients'
@@ -30,7 +30,7 @@ const savePref = (key: string, value: string) => {
 
 export default function Projects() {
   const api = useProjects()
-  const { projects, statusById, statuses, loading, addProject, today, tasksOf } = api
+  const { projects, statusById, statuses, loading, today, tasksOf } = api
   const { clients } = useClients()
   const { statusById: taskStatus, isBlocked } = useTasks()
   const navigate = useNavigate()
@@ -39,6 +39,7 @@ export default function Projects() {
   const [sort, setSort] = useState<Sort>(() => readPref('odessi:projects:sort', 'due'))
   const [client, setClient] = useState<string | null>(null)
   const [fromTemplate, setFromTemplate] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   if (loading) return null
   const behavior = (p: Project) => statusById(p.status_id)?.behavior
@@ -69,10 +70,7 @@ export default function Projects() {
       .sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || a.order_in_group - b.order_in_group)[0] as Task | undefined
   const waitingTask = (p: Project) => tasksOf(p.id).find((t) => taskStatus(t.status_id)?.behavior === 'waiting')
 
-  const newProject = async () => {
-    const p = await addProject({ name: '' })
-    if (p) navigate(`/projects/${p.id}?new=1`)
-  }
+  const newProject = () => setCreating(true)
 
   const pickTab = (t: Tab) => {
     setTab(t)
@@ -200,7 +198,7 @@ export default function Projects() {
                       tabIndex={0}
                       onClick={() => navigate(`/projects/${p.id}`)}
                       onKeyDown={(e) => e.key === 'Enter' && navigate(`/projects/${p.id}`)}
-                      className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(0,1fr)_150px_220px_140px_110px] items-center gap-4 border-divider px-[18px] py-2 hover:bg-[#FAFAFB] [&+&]:border-t"
+                      className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(0,1fr)_150px_220px_140px_110px] items-center gap-4 border-divider px-[18px] py-2 hover:bg-[#F1F1F4] [&+&]:border-t"
                     >
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate text-sm font-medium">{p.name || 'Untitled project'}</span>
@@ -250,6 +248,7 @@ export default function Projects() {
       )}
 
       <TemplateUseModal open={fromTemplate} onClose={() => setFromTemplate(false)} />
+      {creating && <NewProjectModal open onClose={() => setCreating(false)} />}
     </div>
   )
 }

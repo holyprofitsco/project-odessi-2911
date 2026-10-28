@@ -46,6 +46,9 @@ export type Template = {
 
 export type TaskSet = { id: string; name: string; description: string; in_order: boolean; items: PlanItem[]; used_count: number; last_used: string | null; created_at: string }
 
+// A starter task set dressed as a TaskSet, so it can be used like one without saving it first.
+export const starterSet = (s: { key: string; name: string; description: string; in_order: boolean; items: PlanItem[] }): TaskSet => ({ id: `starter-${s.key}`, name: s.name, description: s.description, in_order: s.in_order, items: s.items, used_count: 0, last_used: null, created_at: '' })
+
 export const layoutInfo: Record<Layout, { label: string; hint: string }> = {
   phases: { label: 'Phases', hint: 'Group tasks into stages, like Discovery, Design, Build.' },
   list: { label: 'Task list', hint: 'One simple list. Good for small projects.' },
@@ -105,6 +108,7 @@ type ProjectsState = StageApi & {
   setProjectStatus: (project: Project, statusId: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
   addPhase: (projectId: string, name: string) => Promise<Phase | null>
+  addGroups: (projectId: string, kind: 'phases' | 'milestones', names: string[]) => Promise<void>
   updatePhase: (id: string, changes: Partial<Phase>) => Promise<void>
   deletePhase: (id: string) => Promise<void>
   addMilestone: (projectId: string, name: string, date: string | null) => Promise<Milestone | null>
@@ -269,6 +273,21 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       return data as Phase
     },
     [workspaceId, phases, workspace?.phases_in_order, fail],
+  )
+
+  // Several phases or milestones at once, in order (the quick picks on an empty project).
+  const addGroups = useCallback(
+    async (projectId: string, kind: 'phases' | 'milestones', names: string[]) => {
+      if (!workspaceId) return
+      const mine = (kind === 'phases' ? phases : milestones).filter((p) => p.project_id === projectId)
+      const start = mine.length ? Math.max(...mine.map((p) => p.sort_order)) + 1 : 0
+      const rows = names.map((name, i) => ({ workspace_id: workspaceId, project_id: projectId, name, sort_order: start + i, in_order: workspace?.phases_in_order ?? false }))
+      const { data, error } = await supabase.from(kind).insert(rows).select()
+      if (error || !data) return fail()
+      if (kind === 'phases') setPhases((list) => [...list, ...data])
+      else setMilestones((list) => [...list, ...data])
+    },
+    [workspaceId, phases, milestones, workspace?.phases_in_order, fail],
   )
 
   const updatePhase = useCallback(
@@ -488,7 +507,8 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         const pairs = rows.slice(1).map((r, i) => ({ task_id: r.id, waits_on_task_id: rows[i].id, auto: false }))
         await addDependencies(pairs)
       }
-      await updateTaskSet(set.id, { used_count: set.used_count + 1, last_used: today })
+      // Starters live in code, so there's no row to count uses on.
+      if (!set.id.startsWith('starter-')) await updateTaskSet(set.id, { used_count: set.used_count + 1, last_used: today })
       return added.length
     },
     [workspaceId, tasks, addTasks, addDependencies, updateTaskSet, today],
@@ -586,6 +606,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         setProjectStatus,
         deleteProject,
         addPhase,
+        addGroups,
         updatePhase,
         deletePhase,
         addMilestone,

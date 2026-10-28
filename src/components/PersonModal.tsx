@@ -30,7 +30,7 @@ export function ClientTaskRow({ task, who, onOpen, compact }: { task: Task; who?
       tabIndex={0}
       onClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className={`flex cursor-pointer items-center gap-3 border-divider hover:bg-[#FAFAFB] [&+&]:border-t ${compact ? 'min-h-10 px-3.5 py-1.5' : 'min-h-[50px] px-[18px] py-2'}`}
+      className={`flex cursor-pointer items-center gap-3 border-divider hover:bg-[#F1F1F4] [&+&]:border-t ${compact ? 'min-h-10 px-3.5 py-1.5' : 'min-h-[50px] px-[18px] py-2'}`}
     >
       <Checkbox checked={done} label={done ? `Reopen ${task.title}` : `Mark ${task.title} done`} onChange={toggle} />
       <span className={`min-w-0 flex-1 truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>

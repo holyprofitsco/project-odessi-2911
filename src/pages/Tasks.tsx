@@ -4,12 +4,13 @@ import { MenuWithHint, SaveAsTaskSetModal, SplitButton, TaskSetMenu, TaskSetUseM
 import { useProjects, type TaskSet } from '../lib/projects'
 import TaskModal from '../components/TaskModal'
 import { StageMenu } from '../components/clientParts'
-import { Checkbox, DueText, PriorityPill, RepeatIcon, StatusPill } from '../components/taskParts'
+import { Checkbox, DueText, PriorityPill, RepeatIcon, StatusPill, TaskColumnHeaders, TaskColumns } from '../components/taskParts'
 import { DatePicker } from '../components/pickers'
 import { Button, Card, Dropdown, EmptyState, MenuItem, Modal, Popover, useToast } from '../components/ui'
 import { addDays, describeRepeat, diffDays, formatDate, weekdayNames, weekdayOf } from '../lib/dates'
 import { priorityRank, priorityStyles, useTasks, type Priority, type Status, type Task } from '../lib/tasks'
 import { useClientInfo } from '../lib/clientInfo'
+import { useClients } from '../lib/clients'
 import { useWorkspace } from '../lib/workspace'
 
 type Tab = 'today' | 'upcoming' | 'all'
@@ -153,6 +154,7 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
   const { workspace } = useWorkspace()
   const toast = useToast()
   const { clientFor } = useClientInfo()
+  const { clients } = useClients()
   const visible = useVisibleTasks()
   const [tab, setTab] = useState<Tab>(() => readPref('odessi:tasks:tab', 'today'))
   const [group, setGroup] = useState<Group>(() => readPref('odessi:tasks:group', 'time'))
@@ -180,17 +182,17 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
     const b = behavior(t)
     if (b === 'done') return tab === 'all' || (tab === 'today' && doneToday(t))
     if (tab === 'all') return true
-    // Tasks that can't start yet stay out of Today and Upcoming until the task before them is done.
-    if (isBlocked(t)) return false
-    // Waiting tasks only come into Today on their check-in day. Until then they rest in a folded list at the bottom.
-    if (tab === 'today') return b === 'waiting' ? !!t.waiting_check_in && t.waiting_check_in <= today : !!t.due_date && t.due_date <= today
+    // Waiting and blocked tasks join Today when they're due (or on their check-in day). Before that they sit in the groups below.
+    if (tab === 'today' && (isBlocked(t) || b === 'waiting')) return (!!t.due_date && t.due_date <= today) || (b === 'waiting' && !!t.waiting_check_in && t.waiting_check_in <= today)
+    if (tab === 'today') return !!t.due_date && t.due_date <= today
+    // Upcoming shows blocked tasks too, with a "Can't start until" line, so you see what's lined up behind what.
     return b !== 'waiting' && !!t.due_date && t.due_date > today
   })
   const open = inTab.filter((t) => behavior(t) !== 'done').sort(sorters[sort])
-  const resting =
-    tab === 'today'
-      ? visible.filter((t) => behavior(t) !== 'done' && ((behavior(t) === 'waiting' && !(t.waiting_check_in && t.waiting_check_in <= today)) || (isBlocked(t) && !!t.due_date && t.due_date <= today))).sort(sorters[sort])
-      : []
+  // "Coming up": waiting on a person or another task, and due within a week, so there's time to follow up.
+  const held = (t: Task) => behavior(t) !== 'done' && (behavior(t) === 'waiting' || isBlocked(t)) && !open.includes(t)
+  const comingUp = tab === 'today' ? visible.filter((t) => held(t) && !!t.due_date && t.due_date > today && t.due_date <= addDays(today, 7)).sort(sorters[sort]) : []
+  const resting = tab === 'today' ? visible.filter((t) => held(t) && !comingUp.includes(t)).sort(sorters[sort]) : []
   const done = inTab.filter((t) => behavior(t) === 'done').sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? ''))
 
   const sections: { key: string; title: string; tasks: Task[] }[] = []
@@ -198,7 +200,9 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
 
   if (group === 'project') {
     const ofProject = (id: string) => open.filter((t) => t.project_id === id)
-    for (const p of [...projects].sort((a, b) => a.name.localeCompare(b.name))) push(p.id, p.name || 'Untitled project', ofProject(p.id))
+    // The client goes in the header, so two clients' "Website refresh" projects don't look the same.
+    const clientName = (id: string | null) => clients.find((c) => c.id === id)?.name
+    for (const p of [...projects].sort((a, b) => a.name.localeCompare(b.name))) push(p.id, [p.name || 'Untitled project', clientName(p.client_id)].filter(Boolean).join(' · '), ofProject(p.id))
     push('none', 'No project', open.filter((t) => !projects.some((p) => p.id === t.project_id)))
   } else if (group === 'client') {
     const named = open.map((t) => ({ t, c: clientFor(t) }))
@@ -348,6 +352,10 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
         <DatePicker label="Due date for the new task" value={chosenDate} today={today} weekStart={workspace.week_start} placeholder="No date" onChange={setQuickDate} />
       </Card>
 
+      {(sections.length > 0 || comingUp.length > 0) && (
+        <TaskColumnHeaders className="-mb-1 pr-[18px] pl-3" lead={<span className="w-[calc(16px+12px+18px)] shrink-0" />} />
+      )}
+
       {sections.length === 0 && done.length === 0 ? (
         <EmptyState
           title={tab === 'today' ? 'Nothing on for today' : tab === 'upcoming' ? 'Nothing coming up' : 'No tasks yet'}
@@ -366,22 +374,33 @@ function ListView({ onOpen }: { onOpen: (id: string) => void }) {
             )}
             <Card>
               {s.tasks.map((t) => (
-                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} showClient={group !== 'client'} showProject={group !== 'project'} />
+                <TaskRow key={t.id} {...rowProps(t, s.tasks)} showStatus={group !== 'status'} showClient={group !== 'client' && group !== 'project'} showProject={group !== 'project'} />
               ))}
             </Card>
           </div>
         ))
       )}
 
+      {comingUp.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h2 className="px-1 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Coming up, waiting on others · {comingUp.length}</h2>
+          <Card>
+            {comingUp.map((t) => (
+              <TaskRow key={t.id} {...rowProps(t, comingUp)} showStatus />
+            ))}
+          </Card>
+        </div>
+      )}
+
       {resting.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={() => setShowResting(!showResting)} className="w-fit px-1 text-[13px] font-medium text-muted hover:text-ink">
-            {showResting ? '⌄' : '›'} Waiting on others · {resting.length}
+            {showResting ? '⌄' : '›'} Later, waiting on others · {resting.length}
           </button>
           {showResting && (
             <Card>
               {resting.map((t) => (
-                <TaskRow key={t.id} {...rowProps(t, resting)} showStatus={false} />
+                <TaskRow key={t.id} {...rowProps(t, resting)} showStatus />
               ))}
             </Card>
           )}
@@ -562,7 +581,6 @@ function TaskRow({
 }) {
   const { statusById, tasks, today, blockersOf } = useTasks()
   const { projects } = useProjects()
-  const { workspace } = useWorkspace()
   const { waitingName, clientFor } = useClientInfo()
   const status = statusById(task.status_id)
   if (!status) return null
@@ -594,7 +612,7 @@ function TaskRow({
       }}
       onClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className={`group flex min-h-[52px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-3 hover:bg-[#FAFAFB] focus-visible:bg-[#FAFAFB] focus-visible:outline-none [&+&]:border-t ${selected ? 'bg-accent-tint hover:bg-accent-tint' : ''} ${dragging ? 'opacity-40' : ''}`}
+      className={`group flex min-h-[52px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-3 hover:bg-[#F1F1F4] focus-visible:bg-[#F1F1F4] focus-visible:outline-none [&+&]:border-t ${selected ? 'bg-accent-tint hover:bg-accent-tint' : ''} ${dragging ? 'opacity-40' : ''}`}
     >
       <button
         type="button"
@@ -615,7 +633,7 @@ function TaskRow({
         {(waitingLine || blocker || subs.length > 0 || task.repeat_rule || context) && (
           <span className="flex items-center gap-2 text-xs text-faint">
             {context && <span className="shrink-0 truncate text-muted">{context}</span>}
-            {blocker && !waitingLine && <span className="truncate">Waiting on · {blocker.title}</span>}
+            {blocker && !waitingLine && <span className="truncate">Can't start until {blocker.title}</span>}
             {waitingLine && (
               <span className="truncate text-waiting" title={waitingLine}>
                 {waitingLine}
@@ -631,13 +649,7 @@ function TaskRow({
           </span>
         )}
       </div>
-      <DueText task={task} today={today} done={done} />
-      {workspace?.priorities_on && <PriorityPill priority={task.priority} />}
-      {showStatus && (
-        <span className="flex w-24 justify-end">
-          <StatusPill status={status} />
-        </span>
-      )}
+      <TaskColumns task={task} showStatus={showStatus} />
     </div>
   )
 }

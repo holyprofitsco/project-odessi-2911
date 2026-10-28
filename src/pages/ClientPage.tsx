@@ -5,7 +5,7 @@ import { DatePicker, Floating } from '../components/pickers'
 import PersonModal, { ClientTaskRow, NoteRow, waitingSince } from '../components/PersonModal'
 import TaskModal from '../components/TaskModal'
 import { StatusEditor, StatusPicker, StatusPill } from '../components/taskParts'
-import { ProgressBar, TemplateUseModal } from '../components/projectParts'
+import { NewProjectModal, ProgressBar, TemplateUseModal } from '../components/projectParts'
 import { layoutInfo, useProjects } from '../lib/projects'
 import { Button, Card, Dropdown, MenuItem, Modal, MoreMenu } from '../components/ui'
 import { firstName, useClientInfo } from '../lib/clientInfo'
@@ -252,7 +252,7 @@ function TopBoxes({ client, onOpenTask }: { client: Client; onOpenTask: (id: str
                 setShowAll(false)
                 onOpenTask(t.id)
               }}
-              className="flex flex-col items-start gap-0.5 border-divider px-4 py-3 text-left hover:bg-[#FAFAFB] [&+&]:border-t"
+              className="flex flex-col items-start gap-0.5 border-divider px-4 py-3 text-left hover:bg-[#F1F1F4] [&+&]:border-t"
             >
               <span className="text-sm font-semibold">{t.title}</span>
               <span className="text-[13px] text-waiting">
@@ -322,16 +322,14 @@ function OpenTasks({ client, onOpen }: { client: Client; onOpen: (id: string) =>
 /* Projects for this client: name, dates, layout, progress, status. */
 
 function ClientProjects({ client }: { client: Client }) {
-  const { projects, statusById, progress, addProject, today } = useProjects()
+  const { projects, statusById, progress, today } = useProjects()
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const [fromTemplate, setFromTemplate] = useState(false)
+  const [creating, setCreating] = useState(false)
   if (workspace?.areas_on.projects === false) return null
   const mine = projects.filter((p) => p.client_id === client.id).sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'))
-  const add = async () => {
-    const p = await addProject({ name: '', kind: 'client', client_id: client.id })
-    if (p) navigate(`/projects/${p.id}?new=1`)
-  }
+  const add = () => setCreating(true)
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 px-1">
@@ -347,7 +345,7 @@ function ClientProjects({ client }: { client: Client }) {
           const status = statusById(p.status_id)
           const prog = progress(p.id)
           return (
-            <button key={p.id} type="button" onClick={() => navigate(`/projects/${p.id}`)} className="flex min-h-[52px] w-full items-center gap-4 border-divider px-[18px] py-2 text-left hover:bg-[#FAFAFB] [&+&]:border-t">
+            <button key={p.id} type="button" onClick={() => navigate(`/projects/${p.id}`)} className="flex min-h-[52px] w-full items-center gap-4 border-divider px-[18px] py-2 text-left hover:bg-[#F1F1F4] [&+&]:border-t">
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm font-medium">{p.name || 'Untitled project'}</span>
                 <span className="truncate text-xs text-muted">
@@ -364,6 +362,7 @@ function ClientProjects({ client }: { client: Client }) {
         </button>
       </Card>
       <TemplateUseModal open={fromTemplate} onClose={() => setFromTemplate(false)} clientId={client.id} />
+      {creating && <NewProjectModal open onClose={() => setCreating(false)} clientId={client.id} />}
     </div>
   )
 }

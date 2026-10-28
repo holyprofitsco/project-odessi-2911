@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { diffDays, formatDate, formatTime } from '../lib/dates'
 import type { StageApi } from '../lib/clients'
 import { priorityStyles, statusColors, useTasks, type Priority, type Status, type Task } from '../lib/tasks'
 import { Button, MenuItem, Modal, Pill, Popover, useToast } from './ui'
+import { useWorkspace } from '../lib/workspace'
 
 // Small pieces shared by the Tasks list, the board, and the task pop-up.
 
@@ -86,11 +87,14 @@ export function DueText({ task, today, done }: { task: Task; today: string; done
 
 /* Status picker: a pill you click to change the status. The last item opens the stage editor. */
 
-export function StatusPicker({ status, onPick, onEdit, options }: { status: Status; onPick: (id: string) => void; onEdit: () => void; options?: Status[] }) {
+// small: the pill inside a list row. Clicks stay in the pill so the row doesn't open.
+export function StatusPicker({ status, onPick, onEdit, options, small }: { status: Status; onPick: (id: string) => void; onEdit?: () => void; options?: Status[]; small?: boolean }) {
   const tasksApi = useTasks()
   const statuses = options ?? tasksApi.statuses
   return (
+    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="inline-flex">
     <Popover
+      align={small ? 'end' : 'start'}
       trigger={({ toggle, open }) => (
         <button
           type="button"
@@ -99,7 +103,7 @@ export function StatusPicker({ status, onPick, onEdit, options }: { status: Stat
           onClick={toggle}
           className="rounded-full ring-offset-2 transition-shadow hover:ring-2 hover:ring-border focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
         >
-          <StatusPill status={status} className="h-8 cursor-pointer px-4 text-[13px]" />
+          <StatusPill status={status} className={small ? 'cursor-pointer' : 'h-8 cursor-pointer px-4 text-[13px]'} />
         </button>
       )}
     >
@@ -117,18 +121,23 @@ export function StatusPicker({ status, onPick, onEdit, options }: { status: Stat
               <StatusPill status={s} />
             </MenuItem>
           ))}
-          <div className="my-1 border-t border-divider" />
-          <MenuItem
-            onClick={() => {
-              onEdit()
-              close()
-            }}
-          >
-            Edit stages…
-          </MenuItem>
+          {onEdit && (
+            <>
+              <div className="my-1 border-t border-divider" />
+              <MenuItem
+                onClick={() => {
+                  onEdit()
+                  close()
+                }}
+              >
+                Edit stages…
+              </MenuItem>
+            </>
+          )}
         </div>
       )}
     </Popover>
+    </span>
   )
 }
 
@@ -243,5 +252,41 @@ export function StatusEditor({ open, onClose, api }: { open: boolean; onClose: (
         ))}
       </div>
     </Modal>
+  )
+}
+
+/* The right side of every task list: Due, Priority and Status in fixed columns, so everything lines up under its header. */
+
+export const DUE_COL = 'w-[140px] shrink-0'
+export const PRIORITY_COL = 'w-[84px] shrink-0'
+export const STATUS_COL = 'w-[112px] shrink-0'
+
+export function TaskColumns({ task, showStatus = true }: { task: Task; showStatus?: boolean }) {
+  const { today, statusById, setStatus } = useTasks()
+  const { workspace } = useWorkspace()
+  const status = statusById(task.status_id)
+  const done = status?.behavior === 'done'
+  return (
+    <>
+      <span className={DUE_COL}>
+        <DueText task={task} today={today} done={done} />
+      </span>
+      {workspace?.priorities_on && <span className={PRIORITY_COL}>{task.priority !== 'none' && <PriorityPill priority={task.priority} />}</span>}
+      <span className={STATUS_COL}>{showStatus && status && <StatusPicker small status={status} onPick={(id) => setStatus(task, id)} />}</span>
+    </>
+  )
+}
+
+// Headers line up with TaskColumns. lead is the space taken by whatever sits left of the title.
+export function TaskColumnHeaders({ lead, first = 'Task', className = '' }: { lead: ReactNode; first?: string; className?: string }) {
+  const { workspace } = useWorkspace()
+  return (
+    <div className={`flex items-center gap-3 text-[12px] text-faint ${className}`}>
+      {lead}
+      <span className="min-w-0 flex-1">{first}</span>
+      <span className={DUE_COL}>Due</span>
+      {workspace?.priorities_on && <span className={PRIORITY_COL}>Priority</span>}
+      <span className={STATUS_COL}>Status</span>
+    </div>
   )
 }

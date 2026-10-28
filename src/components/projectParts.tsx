@@ -2,14 +2,14 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useClients } from '../lib/clients'
 import { addDays, formatDate, isWeekend, shortDate, type WeekendChoice } from '../lib/dates'
-import { landDate, layoutInfo, planCount, useProjects, whenLabel, type Layout, type PlanGroup, type PlanItem, type Project, type TaskSet, type Template } from '../lib/projects'
-import { starters, type Starter } from '../lib/starters'
+import { landDate, layoutInfo, starterSet, planCount, useProjects, whenLabel, type Layout, type PlanGroup, type PlanItem, type Project, type TaskSet, type Template } from '../lib/projects'
+import { setStarters, starters, type Starter } from '../lib/starters'
 import { useTasks, type Task } from '../lib/tasks'
 import { useWorkspace } from '../lib/workspace'
 import { Avatar } from './clientParts'
 import { GripIcon } from './icons'
 import { DatePicker, Floating } from './pickers'
-import { Checkbox, DueText, PriorityPill } from './taskParts'
+import { Checkbox, TaskColumnHeaders, TaskColumns } from './taskParts'
 import { Button, MenuItem, Modal, Popover } from './ui'
 
 /* Progress: a thin bar with "7 of 12". */
@@ -123,14 +123,13 @@ export function ProjectTaskRow({
   onDropOn: () => void
   dragging: boolean
 }) {
-  const { statusById, statuses, setStatus, firstOpenStatus, today, blockersOf, holdingUp } = useTasks()
-  const { workspace } = useWorkspace()
+  const { statusById, statuses, setStatus, firstOpenStatus, blockersOf, holdingUp } = useTasks()
   const status = statusById(task.status_id)
   const done = status?.behavior === 'done'
   const open = (t: Task) => !['done', 'canceled'].includes(statusById(t.status_id)?.behavior ?? '')
   const blocker = blockersOf(task.id).find(open)
   const holding = holdingUp(task.id).find(open)
-  const line = status?.behavior === 'waiting' ? { text: `Waiting${task.waiting_on_text ? ` on ${task.waiting_on_text.replace(/@/g, '')}` : ''}`, warm: true } : blocker && !done ? { text: `Waiting on · ${blocker.title}`, warm: false } : holding && !done ? { text: `Holding up · ${holding.title}`, warm: false } : null
+  const line = status?.behavior === 'waiting' ? { text: `Waiting${task.waiting_on_text ? ` on ${task.waiting_on_text.replace(/@/g, '')}` : ''}`, warm: true } : blocker && !done ? { text: `Can't start until ${blocker.title}`, warm: false } : holding && !done ? { text: `Holding up · ${holding.title}`, warm: false } : null
 
   return (
     <div
@@ -149,10 +148,14 @@ export function ProjectTaskRow({
       }}
       onClick={() => onOpen(task.id)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(task.id)}
-      className={`group flex min-h-[50px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-2.5 hover:bg-[#FAFAFB] focus-visible:bg-[#FAFAFB] focus-visible:outline-none [&+&]:border-t ${dragging ? 'opacity-40' : ''}`}
+      className={`group flex min-h-[50px] cursor-pointer items-center gap-3 border-divider py-2 pr-[18px] pl-2.5 hover:bg-[#F1F1F4] focus-visible:bg-[#F1F1F4] focus-visible:outline-none [&+&]:border-t ${dragging ? 'opacity-40' : ''}`}
     >
+      {/* Step numbers give way to the drag dots on hover, so in-order tasks can still be dragged. */}
       <span className="flex w-5 shrink-0 justify-center text-faint" title="Drag to reorder">
-        {step ? <span className="text-xs font-semibold text-muted">{step}</span> : <span className="cursor-grab opacity-0 group-hover:opacity-100"><GripIcon /></span>}
+        {step && <span className="text-xs font-semibold text-muted group-hover:hidden">{step}</span>}
+        <span className={`cursor-grab ${step ? 'hidden group-hover:inline' : 'opacity-0 group-hover:opacity-100'}`}>
+          <GripIcon />
+        </span>
       </span>
       <Checkbox
         checked={done}
@@ -166,8 +169,7 @@ export function ProjectTaskRow({
         <span className={`truncate text-sm font-medium ${done ? 'text-faint line-through' : ''}`}>{task.title}</span>
         {line && <span className={`truncate text-xs ${line.warm ? 'text-waiting' : 'text-faint'}`}>{line.text}</span>}
       </div>
-      <DueText task={task} today={today} done={done} />
-      {workspace?.priorities_on && <PriorityPill priority={task.priority} />}
+      <TaskColumns task={task} />
     </div>
   )
 }
@@ -175,24 +177,85 @@ export function ProjectTaskRow({
 /* Adds a task to a group: type and press Enter. "Edit video after Film video" works here too. */
 
 export function AddTaskLine({ label, onAdd }: { label: string; onAdd: (title: string) => Promise<void> }) {
+  const [typing, setTyping] = useState(false)
   const [draft, setDraft] = useState('')
   return (
-    <div className="flex items-center border-divider px-[18px] [&:not(:first-child)]:border-t">
-      <input
-        aria-label={label}
-        placeholder={`+ ${label}`}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={async (e) => {
-          if (e.key !== 'Enter' || !draft.trim()) return
-          const t = draft.trim()
-          setDraft('')
-          await onAdd(t)
-        }}
-        className="h-11 flex-1 bg-transparent pl-8 text-[13px] font-medium placeholder:text-muted focus:outline-none"
-      />
+    <div className="flex min-h-11 items-center border-divider px-[18px] [&:not(:first-child)]:border-t">
+      {typing ? (
+        <input
+          autoFocus
+          aria-label={label}
+          placeholder="Name the task, then press Enter"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => !draft.trim() && setTyping(false)}
+          onKeyDown={async (e) => {
+            if (e.key === 'Escape') {
+              setDraft('')
+              setTyping(false)
+            }
+            if (e.key !== 'Enter' || !draft.trim()) return
+            const t = draft.trim()
+            setDraft('')
+            await onAdd(t)
+          }}
+          className="h-11 flex-1 bg-transparent pl-8 text-sm placeholder:text-faint focus:outline-none"
+        />
+      ) : (
+        <button type="button" onClick={() => setTyping(true)} className="ml-7 rounded-lg px-2 py-1.5 text-[13px] font-medium text-muted hover:bg-divider hover:text-ink">
+          + {label}
+        </button>
+      )}
     </div>
   )
+}
+
+/* "Any order ▾" on a phase, milestone or task set. The menu says what each choice does, so nobody has to guess. */
+
+export const orderInfo = {
+  any: { label: 'Any order', hint: 'Do these tasks whenever you like.' },
+  in: { label: 'In order', hint: 'Each task waits for the one above it. Steps get numbers, and only the next one shows up in Today.' },
+}
+
+export function OrderPicker({ inOrder, onChange }: { inOrder: boolean; onChange: (v: boolean) => void }) {
+  const now = inOrder ? orderInfo.in : orderInfo.any
+  return (
+    <Popover
+      trigger={({ toggle, open }) => (
+        <button type="button" aria-expanded={open} onClick={toggle} title={now.hint} className="rounded-md px-1.5 py-0.5 text-xs whitespace-nowrap text-muted hover:bg-divider hover:text-ink">
+          {now.label} ▾
+        </button>
+      )}
+    >
+      {(close) => (
+        <div className="flex w-72 flex-col p-1">
+          {(['any', 'in'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => {
+                close()
+                onChange(k === 'in')
+              }}
+              className="flex items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-divider"
+            >
+              <span className="w-4 pt-0.5 text-accent">{(k === 'in') === inOrder ? '✓' : ''}</span>
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[13px] font-medium">{orderInfo[k].label}</span>
+                <span className="text-xs leading-relaxed text-muted">{orderInfo[k].hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </Popover>
+  )
+}
+
+/* Column names over the project's task cards. Lines up with ProjectTaskRow. */
+
+export function ProjectColumnHeaders() {
+  return <TaskColumnHeaders className="-mb-2 pr-[19px] pl-[11px]" lead={<span className="w-[calc(20px+12px+18px)] shrink-0" />} />
 }
 
 /* Project picker for the task pop-up. */
@@ -282,10 +345,10 @@ function defaultWeekend(rule: string | undefined): WeekendChoice {
   return rule === 'friday' || rule === 'monday' ? rule : 'keep'
 }
 
-/* Plan preview: every group and task with real dates, and checkboxes to skip what you don't need this time. */
+/* Plan preview: a calm list of every group and task with its real date, and checkboxes to skip what you don't need this time. */
 
 function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend, today }: { groups: PlanGroup[]; layout: Layout; countFrom: 'start' | 'launch'; anchor: string; skip: Set<string>; setSkip: (s: Set<string>) => void; weekend: WeekendChoice; today: string }) {
-  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(groups.slice(0, 1).map((g) => g.id)))
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(groups.map((g) => g.id)))
   const toggle = (id: string) => {
     const next = new Set(skip)
     if (!next.delete(id)) next.add(id)
@@ -299,7 +362,7 @@ function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend
   const when = (i: PlanItem) => formatDate(landDate(anchor, i.offset, weekend), today)
   const list = layout === 'list'
   return (
-    <div className="flex flex-col rounded-xl border border-border">
+    <div className="flex max-h-[52vh] flex-col overflow-y-auto rounded-xl border border-border">
       {groups.map((g, gi) => {
         const skipped = skip.has(g.id)
         const dates = g.items.map((i) => landDate(anchor, i.offset, weekend)).sort()
@@ -316,12 +379,9 @@ function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend
                     {layout === 'phases' ? `${gi + 1}. ` : ''}
                     {g.name || 'Untitled'}
                   </span>
+                  {g.in_order && <span className="text-xs font-normal text-faint">In order</span>}
                 </button>
-                <span className="text-xs text-muted">{range}</span>
-                <span className="w-24 text-right text-xs text-faint">
-                  {g.items.length} {g.items.length === 1 ? 'task' : 'tasks'}
-                  {g.in_order && ' · in order'}
-                </span>
+                <span className="w-28 text-right text-xs text-muted">{range}</span>
               </div>
             )}
             {isOpen && !skipped && (
@@ -331,8 +391,9 @@ function PlanPreview({ groups, layout, countFrom, anchor, skip, setSkip, weekend
                     <Include checked={!skip.has(i.id)} label={`${skip.has(i.id) ? 'Include' : 'Skip'} ${i.title}`} onChange={() => toggle(i.id)} />
                     {g.in_order && <span className="w-4 text-xs font-semibold text-muted">{ii + 1}</span>}
                     <span className={`min-w-0 flex-1 truncate text-[13px] ${skip.has(i.id) ? 'text-faint line-through' : ''}`}>{i.title}</span>
-                    <span className="text-xs text-faint">{whenLabel(i.offset, countFrom)}</span>
-                    <span className="w-28 text-right text-xs text-muted">{when(i)}</span>
+                    <span className="w-28 text-right text-xs text-muted" title={whenLabel(i.offset, countFrom)}>
+                      {when(i)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -586,7 +647,13 @@ export function TaskSetMenu({ onPick, onManage }: { onPick: (s: TaskSet) => void
       {sets.map((s) => (
         <MenuWithHint key={s.id} title={s.name || 'Untitled set'} hint={`${s.items.length} ${s.items.length === 1 ? 'task' : 'tasks'}${s.used_count ? ` · Used ${s.used_count === 1 ? 'once' : `${s.used_count} times`}` : ''}`} onClick={() => onPick(s)} />
       ))}
-      {sets.length === 0 && <span className="px-2.5 py-2 text-xs text-muted">No task sets yet. Make one in Manage task sets, or select tasks and choose Save as task set.</span>}
+      {sets.length > 0 && <div className="my-1 border-t border-divider" />}
+      <span className="px-2.5 pt-1.5 pb-0.5 text-[11px] font-bold tracking-[0.06em] text-faint uppercase">Starters</span>
+      {setStarters
+        .filter((st) => !taskSets.some((s) => s.name === st.name))
+        .map((st) => (
+          <MenuWithHint key={st.key} title={st.name} hint={`${st.items.length} tasks · ${st.description}`} onClick={() => onPick(starterSet(st))} />
+        ))}
       <div className="my-1 border-t border-divider" />
       <MenuItem onClick={onManage}>Manage task sets</MenuItem>
     </div>
@@ -650,3 +717,108 @@ export function DateRange({ start, end, today }: { start: string | null; end: st
 
 export { Floating }
 export const useAnchor = () => useRef<HTMLButtonElement>(null)
+
+/* New project: a short pop-up that asks the few things a project needs up front. */
+
+export function NewProjectModal({ open, onClose, clientId }: { open: boolean; onClose: () => void; clientId?: string | null }) {
+  const { addProject, today } = useProjects()
+  const { clients } = useClients()
+  const { workspace } = useWorkspace()
+  const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [kind, setKind] = useState<'client' | 'mine'>(clientId ? 'client' : 'mine')
+  const [client, setClient] = useState<string | null>(clientId ?? null)
+  const [layout, setLayout] = useState<Layout>(workspace?.project_layout ?? 'phases')
+  const [start, setStart] = useState<string | null>(today)
+  const [end, setEnd] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const launch = layout === 'milestones'
+
+  const create = async () => {
+    setBusy(true)
+    const p = await addProject({ name: name.trim(), kind, client_id: kind === 'client' ? client : null, layout, start_date: start, ...(launch ? { launch_date: end } : { due_date: end }) })
+    setBusy(false)
+    if (!p) return
+    onClose()
+    navigate(`/projects/${p.id}`)
+  }
+
+  const choice = (on: boolean) => `flex flex-1 flex-col gap-0.5 rounded-xl border-[1.5px] px-3.5 py-2.5 text-left ${on ? 'border-ink bg-surface' : 'border-field hover:border-[#C4C4CA]'}`
+  const label = 'text-[13px] font-semibold'
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New project"
+      footer={
+        <>
+          <span />
+          <div className="flex gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" disabled={busy || !name.trim() || (kind === 'client' && !client)} onClick={create}>
+              Create project
+            </Button>
+          </div>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-5">
+        <label className="flex flex-col gap-1.5">
+          <span className={label}>Name</span>
+          <input
+            autoFocus
+            value={name}
+            placeholder="Like Website refresh, or Spring course launch"
+            onChange={(e) => setName(e.target.value)}
+            className="h-10 rounded-xl border-[1.5px] border-field px-3 text-sm placeholder:text-faint focus:border-ink focus:outline-none"
+          />
+        </label>
+
+        <div className="flex flex-col gap-1.5">
+          <span className={label}>Who’s it for?</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setKind('client')} className={choice(kind === 'client')}>
+              <span className="text-[13px] font-medium">Client work</span>
+              <span className="text-xs text-muted">Something you’re doing for a client</span>
+            </button>
+            <button type="button" onClick={() => setKind('mine')} className={choice(kind === 'mine')}>
+              <span className="text-[13px] font-medium">My business</span>
+              <span className="text-xs text-muted">Your own launch, course or idea</span>
+            </button>
+          </div>
+          {kind === 'client' && (
+            <div className="flex items-center gap-2 pt-1 text-[13px]">
+              <span className="text-muted">Client</span>
+              <ClientSelect value={client} clients={clients} onChange={setClient} />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <span className={label}>How should it be laid out?</span>
+          <div className="flex gap-2">
+            {(['phases', 'list', 'milestones'] as Layout[]).map((l) => (
+              <button key={l} type="button" onClick={() => setLayout(l)} className={choice(layout === l)}>
+                <span className="text-[13px] font-medium">{layoutInfo[l].label}</span>
+                <span className="text-xs leading-snug text-muted">{layoutInfo[l].hint}</span>
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-faint">You can switch anytime. Your tasks stay put.</span>
+        </div>
+
+        <div className="flex gap-6">
+          <div className="flex flex-col gap-1.5">
+            <span className={label}>Project starts</span>
+            <DatePicker label="Project starts" value={start} today={today} weekStart={workspace?.week_start} placeholder="Pick a date" onChange={setStart} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className={label}>{launch ? 'Launch day' : 'Due'}</span>
+            <DatePicker label={launch ? 'Launch day' : 'Due'} value={end} today={today} weekStart={workspace?.week_start} placeholder={launch ? 'The big day' : 'Optional'} onChange={setEnd} />
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}

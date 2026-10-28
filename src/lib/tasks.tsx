@@ -360,8 +360,8 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   )
 
   const setStatusRef = useRef<((task: Task, statusId: string) => Promise<void>) | null>(null)
-  const setStatus = useCallback(
-    async (task: Task, statusId: string) => {
+  const applyStatus = useCallback(
+    async (task: Task, statusId: string, quiet = false) => {
       const next = statusById(statusId)
       const prev = statusById(task.status_id)
       if (!next || !prev || next.id === prev.id) return
@@ -419,7 +419,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
 
       const message =
         next.behavior === 'done' ? (freed.length ? `Marked done. You're up on “${freed[0].title}”.` : 'Marked done') : next.behavior === 'canceled' ? 'Task canceled' : null
-      if (message) {
+      if (message && !quiet) {
         toast(message, async () => {
           for (const t of flipped) await updateTask(t.id, { status_id: t.status_id, waiting_since: t.waiting_since, waiting_check_in: t.waiting_check_in, waiting_on_text: t.waiting_on_text, waiting_on_task_id: t.waiting_on_task_id })
           await updateTask(task.id, snapshot)
@@ -438,7 +438,26 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     },
     [statusById, updateTask, today, workspace, createNext, deleteTask, toast, tasks, deps, finished, firstOpenStatus],
   )
-  setStatusRef.current = setStatus
+  setStatusRef.current = applyStatus
+
+  // Finishing a task whose earlier step is still open asks first, so "Do in order" means something.
+  const [early, setEarly] = useState<{ task: Task; statusId: string; blockers: Task[] } | null>(null)
+  const setStatus = useCallback(
+    async (task: Task, statusId: string) => {
+      const next = statusById(statusId)
+      const open = blockersOf(task.id).filter((b) => !finished(b))
+      if (next?.behavior === 'done' && !finished(task) && open.length) return setEarly({ task, statusId, blockers: open })
+      await applyStatus(task, statusId)
+    },
+    [statusById, blockersOf, finished, applyStatus],
+  )
+  const finishEarly = async (both: boolean) => {
+    const e = early
+    setEarly(null)
+    if (!e) return
+    if (both) for (const b of e.blockers) await applyStatus(b, e.statusId, true)
+    await applyStatus(e.task, e.statusId)
+  }
 
   const duplicateTask = useCallback(
     async (task: Task) => {
@@ -561,6 +580,28 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      <Modal
+        open={!!early}
+        onClose={() => setEarly(null)}
+        title={early ? `“${early.blockers[0].title}” isn't done yet` : ''}
+        footer={
+          <>
+            <Button onClick={() => setEarly(null)}>Cancel</Button>
+            <div className="flex gap-2">
+              <Button onClick={() => finishEarly(false)}>Just this one</Button>
+              <Button variant="primary" onClick={() => finishEarly(true)}>
+                {early && early.blockers.length > 1 ? 'Mark them all done' : 'Mark both done'}
+              </Button>
+            </div>
+          </>
+        }
+      >
+        {early && (
+          <p className="text-sm leading-relaxed text-muted">
+            “{early.task.title}” is supposed to wait for {early.blockers.map((b) => `“${b.title}”`).join(', ')}. Mark it done anyway?
+          </p>
+        )}
+      </Modal>
       <Modal
         open={!!slip}
         onClose={() => setSlip(null)}
